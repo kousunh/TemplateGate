@@ -143,6 +143,46 @@ def test_replacing_text_across_several_runs_reports_text_only(tmp_path):
     assert _attributes(diff(baseline, candidate)) == {"text"}
 
 
+def test_proofing_metadata_does_not_make_a_text_edit_a_failure(tmp_path):
+    """Real Word stamps w:lang on every run a person touches.
+
+    It changes nothing a reader can see, so an approved text edit made in Word
+    must still report one text change and nothing else.
+    """
+    before = "<w:p><w:r><w:t>Original sentence here.</w:t></w:r></w:p>"
+    after = ('<w:p><w:r><w:rPr><w:lang w:val="en-US"/><w:noProof/>'
+             '<w:snapToGrid w:val="0"/></w:rPr>'
+             "<w:t>Rewritten sentence here.</w:t></w:r></w:p>")
+    baseline, candidate = _pair(tmp_path, before, after)
+    assert [(c.location, c.attribute) for c in diff(baseline, candidate)] == [
+        ("p2", "text")
+    ]
+    assert check(baseline, candidate, BODY_TEXT_ONLY).passed
+
+
+def test_proofing_metadata_alone_is_not_a_change(tmp_path):
+    before = "<w:p><w:r><w:t>Clause.</w:t></w:r></w:p>"
+    after = ('<w:p><w:r><w:rPr><w:lang w:val="ja-JP"/></w:rPr>'
+             "<w:t>Clause.</w:t></w:r></w:p>")
+    baseline, candidate = _pair(tmp_path, before, after)
+    assert diff(baseline, candidate) == []
+
+
+@pytest.mark.parametrize("properties,name", [
+    ("<w:rPr><w:specVanish/></w:rPr>", "specVanish"),
+    ('<w:rPr><w:kern w:val="2"/></w:rPr>', "kern"),
+])
+def test_rendering_properties_are_still_markup(tmp_path, properties, name):
+    """Ignoring proofing metadata must not quietly ignore its neighbours."""
+    baseline, candidate = _pair(
+        tmp_path,
+        "<w:p><w:r><w:t>Clause.</w:t></w:r></w:p>",
+        f"<w:p><w:r>{properties}<w:t>Clause.</w:t></w:r></w:p>")
+    changes = diff(baseline, candidate)
+    assert "markup" in _attributes(changes), name
+    assert not check(baseline, candidate, BODY_TEXT_ONLY).passed
+
+
 def test_revision_ids_are_not_markup(tmp_path):
     """Word stamps rsid attributes on every save; they mean nothing."""
     before = "<w:p><w:r><w:t>Clause.</w:t></w:r></w:p>"

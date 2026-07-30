@@ -292,9 +292,17 @@ def revision_marks(element) -> tuple[int, int]:
 # Removed because another attribute already reports them: text, tabs and
 # breaks are `text`/`paragraph_format`, bookmarks are `bookmark`.  Proofing
 # marks and rendered-page hints are noise Word rewrites on every save.
+#
+# The proofing group matters more than it looks: Word stamps w:lang (and
+# w:noProof, w:snapToGrid) onto every run a person edits.  None of them change
+# what a reader sees, so counting them would turn an ordinary approved text
+# edit into a failure for any document that has been through real Word.
+# w:specVanish and w:kern stay out of this set on purpose — they change how
+# the text renders.
 _MODELLED_ELEMENTS = frozenset({
     "t", "delText", "instrText", "tab", "br", "cr", "noBreakHyphen",
     "bookmarkStart", "bookmarkEnd", "proofErr", "lastRenderedPageBreak",
+    "lang", "noProof", "snapToGrid",
 })
 # Wrappers whose own identity is modelled (revisions) or lives elsewhere
 # (hyperlink targets are compared as package links).  Their children still
