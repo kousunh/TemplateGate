@@ -51,10 +51,16 @@ Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の�
 ## インストール
 
 ```bash
-pip install templategate
+pip install git+https://github.com/kousunh/TemplateGate.git
 ```
 
-Python 3.10+。依存は openpyxl / python-docx / PyYAML のみ。
+PyPI への公開は予定されており、公開後は `pip install templategate` が
+インストールコマンドになります。それまではリポジトリからインストール
+してください。
+
+Python 3.10+。検査の実行に Office のインストールもネットワーク接続も
+不要です。依存パッケージ: openpyxl / python-docx(lxml を伴う)/
+Pillow / PyYAML。
 
 ## クイックスタート
 
@@ -111,15 +117,57 @@ semantic:
 structural の各カテゴリは、書かなくても既定で `strict` です(行を消しても
 無効にはなりません)。除外したい場合は `ignore` を指定します。
 
+実例が [`examples/`](examples/) に2つあります。エージェントに数量セルの
+更新だけを許す Excel 用
+([excel-quantity-update.policy.yaml](examples/excel-quantity-update.policy.yaml))と、
+本文の書き換えだけを許してそれ以外を固定する Word 用
+([word-body-rewrite.policy.yaml](examples/word-body-rewrite.policy.yaml))。
+全体にコメントが付いており、実際のポリシーを掴む最短経路です。
+
+### ポリシーの書き方: まず diff から
+
+ポリシーの中身を当てずっぽうで書く必要はありません。許可したい編集を
+実際に一度やってみて(手作業でも、エージェントに一度やらせてもよい)、
+何が変わったかを見ます:
+
+```bash
+templategate diff --baseline plan.xlsx --candidate plan.edited.xlsx
+```
+
+すべての変更が、ポリシーのルールにそのまま書けるロケーションと属性名
+付きで一覧されます。**編集の目的だったもの**だけを allow に書き、
+残りは default deny に任せてください。なお、**正当な編集**に対して
+`diff` を実行することは、使っている編集ツールが途中で何を壊すかを
+知る方法でもあります。
+
+### モードの選択
+
+```yaml
+mode: normal_input    # review_only | normal_input | page_extension
+```
+
+- `normal_input`(既定)は位置で比較します。12番目の段落は12番目のまま
+  であるべき、という前提です。違反はすべてエラーになります。
+- `page_extension` は「増えることが前提」の Word 文書向けです。段落を
+  内容で対応付けるため、1つ挿入しても以降の段落すべてが変更扱いには
+  なりません。本当に移動したブロックは `moved` として報告されます。
+  同じ「段落1つ削除」でも、`normal_input` が10件の違反を出すのに対し
+  `page_extension` は1件です。
+- `review_only` は違反を警告として報告し、終了コードは 0 になります。
+  強制する前に「このポリシーなら何を捕まえるか」を確認する用途に向きます。
+  ただし**開けない文書を通すことはできません**。
+
 ### ポリシーで指定できるもの
 
-`templategate init` が生成する雛形には、全属性・全 structural キーが
-コメント付きで書き出されます。陳腐化しない参照先として、まずそちらを
-見てください。特に知っておく価値があるもの:
+`templategate init` は、指定したターゲット用の雛形を属性・structural キー
+込みで書き出します。現時点の一覧を見る最短の方法です。特に知っておく
+価値があるもの:
 
-- **パッケージパート(両形式共通)** — `charts` / `pivot_tables` /
-  `drawings` / `comments` / `embedded` / `custom_xml` に加えて
-  `parts` と `links`。`parts` はそれ以外すべてを受け止める包括カテゴリで、
+- **パッケージパート** — `charts` / `comments` / `embedded` /
+  `custom_xml` / `parts` / `links` は両形式共通。`pivot_tables` と
+  `drawings`(図形・テキストボックス・グラフ枠)は **Excel 側**のもので、
+  Word では相当するものが本文パート内にあり、後述の Word 属性が
+  カバーします。`parts` はそれ以外すべてを受け止める包括カテゴリで、
   TemplateGate が名前を知らないパートも含みます(消失は既定で破損扱い)。
   `links` はリレーションシップの外部参照先を比較するので、
   **表示文字はそのままで飛び先URLだけ差し替えられたハイパーリンク**を
@@ -158,6 +206,31 @@ Word のコンテンツコントロールとテキストボックスは `sdt1` /
 `'Q1!Q4'!A1` は「Q1!Q4」というシートのセル A1 を指し、クォートなしの
 `Q1!Q4` は「Q1」というシートのセル Q4 を意味します。クォートが必要なのは
 これらの文字を含む名前のときだけです。
+
+### 意味解析(semantic)は任意
+
+ここまでの検査はすべて決定的で、オフラインで完結します。`semantic`
+ブロックは「日付や期間に矛盾がないこと」のような、構造だけでは判断
+できない項目を追加するためのものです。編集前後のテキストを、利用者が
+指定したコマンドに渡します:
+
+```yaml
+semantic:
+  mode: "off"           # off(既定)| review | gate
+  provider: command
+  command: "claude -p"  # 標準入力でプロンプトを受け、JSONを出力するCLI
+  model: ""             # そのコマンドに $TEMPLATEGATE_MODEL として渡される
+  checks:
+    - "日付や期間に矛盾がないこと"
+```
+
+既定の `mode: off` では通信は一切発生しません。`review` は所見を警告
+として報告し、PASS/FAIL を変えません。`gate` では fail 判定の所見が
+実行全体を FAIL にします。コマンドは標準入力でプロンプトを受け取り、
+`{check, verdict, message}`(verdict は `pass` / `fail` / `warning`)の
+JSON 配列を出力します。したがってモデルもベンダーも自由に選べ、
+TemplateGate は何も固定しません。`off` 以外のモードでコマンドが未設定の
+場合は、黙って検査を飛ばすのではなく設定エラーとして報告されます。
 
 ### レポートの読み方
 

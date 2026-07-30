@@ -54,10 +54,15 @@ Verification has to live outside the agent.
 ## Install
 
 ```bash
-pip install templategate
+pip install git+https://github.com/kousunh/TemplateGate.git
 ```
 
-Requires Python 3.10+. Pure-Python dependencies only (openpyxl, python-docx, PyYAML).
+Publishing to PyPI is planned, after which `pip install templategate` will be
+the install command. Until then, install from the repository.
+
+Requires Python 3.10+. No Office installation and no network access are needed
+to run a check. Dependencies: openpyxl, python-docx (which brings lxml),
+Pillow, and PyYAML.
 
 ## Quick start
 
@@ -114,18 +119,58 @@ semantic:
 Every structural category is `strict` unless you say otherwise — deleting the
 line does not turn it off. Set one to `ignore` to opt out.
 
+Two worked examples live in [`examples/`](examples/): an Excel policy that
+lets an agent update quantity cells and nothing else
+([excel-quantity-update.policy.yaml](examples/excel-quantity-update.policy.yaml)),
+and a Word one that allows body-text rewriting while locking everything else
+([word-body-rewrite.policy.yaml](examples/word-body-rewrite.policy.yaml)).
+They are commented throughout and are the fastest way to see a real policy.
+
+### Writing a policy: start from diff
+
+You do not have to guess what to put in a policy. Make the edit you intend to
+allow — by hand, or by letting the agent do it once — and ask what changed:
+
+```bash
+templategate diff --baseline plan.xlsx --candidate plan.edited.xlsx
+```
+
+Every change is listed with the exact location and attribute name a policy
+rule would use. Allow the ones that were the point of the edit, and leave
+everything else to default deny. Running `diff` on a *legitimate* edit is also
+how you find out what your editing tool damages on the way past.
+
+### Choosing a mode
+
+```yaml
+mode: normal_input    # review_only | normal_input | page_extension
+```
+
+- `normal_input` (the default) compares by position: paragraph 12 is expected
+  to still be paragraph 12. Every violation is an error.
+- `page_extension` is for Word documents that are meant to grow. Paragraphs
+  are aligned by content, so inserting one does not report every paragraph
+  after it as changed, and a block that genuinely moved is reported as
+  `moved`. On the same one-paragraph deletion, `normal_input` reports ten
+  violations and `page_extension` reports one.
+- `review_only` reports violations as warnings and exits 0. Useful for seeing
+  what a policy would catch before you enforce it. It cannot bless a document
+  that will not open.
+
 ### What a policy can name
 
-`templategate init` writes a starter policy listing every attribute and
-structural key with a comment, so treat that as the reference — it cannot go
-stale. The ones worth knowing about:
+`templategate init` writes a starter policy for the target you name, with the
+attributes and structural keys already filled in — the fastest way to see the
+current set. The ones worth knowing about:
 
-- **Package parts, both formats** — `charts`, `pivot_tables`, `drawings`,
-  `comments`, `embedded`, `custom_xml`, plus `parts` and `links`. `parts` is
-  the catch-all for everything else in the file, including parts TemplateGate
-  has never heard of, so losing one is damage by default. `links` compares the
-  external targets of relationships, which is what catches a hyperlink
-  repointed to a new URL while its display text is untouched.
+- **Package parts** — `charts`, `comments`, `embedded`, `custom_xml`, `parts`
+  and `links` apply to both formats; `pivot_tables` and `drawings` (shapes,
+  textboxes and chart frames) are Excel-side, since a Word document keeps its
+  equivalents in the document body where the Word attributes below cover them.
+  `parts` is the catch-all for everything else in the file, including parts
+  TemplateGate has never heard of, so losing one is damage by default. `links`
+  compares the external targets of relationships, which is what catches a
+  hyperlink repointed to a new URL while its display text is untouched.
 - **Excel** — `layout` (hidden rows and columns, and their sizes),
   `protection` (sheet and workbook locking), `sheet_settings` (a workbook
   switched to manual calculation, or Excel's warning triangles suppressed).
@@ -159,6 +204,31 @@ Sheet names are quoted Excel-style when they contain `'`, `!` or `#`:
 `'Q1!Q4'!A1` is cell A1 of the sheet named `Q1!Q4`, where bare `Q1!Q4` would
 mean cell Q4 of a sheet named `Q1`. You only need the quotes for names
 containing those characters.
+
+### Optional semantic checks
+
+Everything above is deterministic and offline. The `semantic` block adds
+judgement calls that structure alone cannot make — "the dates must not
+contradict each other" — by handing the baseline and candidate text to a
+command you choose:
+
+```yaml
+semantic:
+  mode: "off"           # off (default) | review | gate
+  provider: command
+  command: "claude -p"  # any CLI that reads a prompt on stdin, prints JSON
+  model: ""             # passed to that command as $TEMPLATEGATE_MODEL
+  checks:
+    - "dates and periods must not contradict each other"
+```
+
+`mode: off` is the default and makes no network calls at all. `review`
+reports findings as warnings that never change PASS/FAIL; `gate` lets a
+failed finding fail the run. The command receives a prompt on stdin and must
+print a JSON array of `{check, verdict, message}`, where verdict is
+`pass`, `fail` or `warning` — so any model or vendor works, and TemplateGate
+pins none. With a non-`off` mode and no command set, the run reports a
+configuration error rather than silently skipping the checks.
 
 ### Reading a report
 
