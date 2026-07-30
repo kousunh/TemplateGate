@@ -18,7 +18,10 @@ def render_text(result: CheckResult) -> str:
     ]
     if result.violations:
         lines.append("")
-        lines.append("Violations:")
+        if result.meta.get("policy_mode") == "review_only":
+            lines.append("Violations (mode: review_only — reported, not blocking):")
+        else:
+            lines.append("Violations:")
         for v in result.violations:
             lines.append(f"  [{v.severity}] {v.change.location} ({v.change.attribute}): {v.message}")
             if v.change.old is not None or v.change.new is not None:

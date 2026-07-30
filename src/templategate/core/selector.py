@@ -33,22 +33,59 @@ def _cell_to_tuple(coord: str) -> tuple[int, int]:
     return column_index_from_string(col), row
 
 
-def _split_sheet(location: str) -> tuple[str, str]:
-    """Split "Sheet1!B2" / "Sheet1#print" into (sheet, rest). rest may be ""."""
-    for sep in ("!", "#"):
-        if sep in location:
-            sheet, rest = location.split(sep, 1)
-            return sheet.strip("'"), rest
-    return location.strip("'"), ""
+# Sheet-level location kinds that follow the "#" separator.  Anything else
+# after a "#" is part of the sheet name — "#" is legal in Excel sheet names.
+_LOCATION_KINDS = ("print", "header_footer")
+
+# Excel grid limits, used to close the open ends of whole-column ("B:B") and
+# whole-row ("4:4") ranges, for which openpyxl reports None boundaries.
+_MAX_COL = 16384
+_MAX_ROW = 1048576
+
+
+def _is_location_kind(rest: str) -> bool:
+    return rest in _LOCATION_KINDS or rest.startswith("image:")
+
+
+def _bounds(ref: str) -> tuple[int, int, int, int] | None:
+    """A1-style range boundaries with whole-column/row open ends closed."""
+    try:
+        min_c, min_r, max_c, max_r = range_boundaries(ref)
+    except (ValueError, TypeError):
+        return None
+    return (
+        1 if min_c is None else min_c,
+        1 if min_r is None else min_r,
+        _MAX_COL if max_c is None else max_c,
+        _MAX_ROW if max_r is None else max_r,
+    )
+
+
+def _split_sheet(location: str) -> tuple[str, str, str]:
+    """Split "Sheet1!B2" / "Sheet1#print" into (sheet, separator, rest).
+
+    Sheet names may themselves contain "!" and "#", so the split happens at
+    the *last* separator, "#" only counts when what follows it is a known
+    location kind, and "!" only when what follows it is a real A1 range.
+    ``separator`` is "" for a bare sheet name.
+    """
+    bang = location.rfind("!")
+    hash_ = location.rfind("#")
+    if hash_ > bang and _is_location_kind(location[hash_ + 1:]):
+        return location[:hash_].strip("'"), "#", location[hash_ + 1:]
+    if bang != -1 and _bounds(location[bang + 1:]) is not None:
+        return location[:bang].strip("'"), "!", location[bang + 1:]
+    return location.strip("'"), "", ""
 
 
 def _range_contains(outer: str, inner: str) -> bool:
     """True if A1-style range/cell `inner` lies fully inside range `outer`."""
-    try:
-        o_min_c, o_min_r, o_max_c, o_max_r = range_boundaries(outer)
-        i_min_c, i_min_r, i_max_c, i_max_r = range_boundaries(inner)
-    except ValueError:
+    o = _bounds(outer)
+    i = _bounds(inner)
+    if o is None or i is None:
         return False
+    o_min_c, o_min_r, o_max_c, o_max_r = o
+    i_min_c, i_min_r, i_max_c, i_max_r = i
     return (
         o_min_c <= i_min_c
         and o_min_r <= i_min_r
@@ -98,18 +135,20 @@ def match_selector(selector: str, location: str) -> bool:
     # Excel-style selectors: "Sheet1" or "Sheet1!<range>".
     if location.startswith(("sheet:", "name:")) or location == "vba":
         return False
-    sel_sheet, sel_rest = _split_sheet(selector)
-    loc_sheet, loc_rest = _split_sheet(location)
+    sel_sheet, sel_sep, sel_rest = _split_sheet(selector)
+    loc_sheet, loc_sep, loc_rest = _split_sheet(location)
     if sel_sheet != loc_sheet:
         return False
-    if not sel_rest:
+    if not sel_sep:
         return True  # whole-sheet selector
-    if not loc_rest:
+    if not loc_sep:
         return False
-    # Both have a range/cell part; "#" locations (print, images...) never
-    # match a ranged selector.
-    if "#" in selector or "#" in location:
+    # A ranged ("!") selector never matches a sheet-level ("#") location such
+    # as print settings or images, and vice versa.
+    if sel_sep != loc_sep:
         return False
+    if sel_sep == "#":
+        return sel_rest == loc_rest
     return _range_contains(sel_rest, loc_rest)
 
 

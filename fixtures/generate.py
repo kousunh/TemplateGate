@@ -11,12 +11,30 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
+from docx.shared import Pt, RGBColor
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 
 OUT = Path(__file__).parent / "generated"
+
+# Same pixel dimensions, different content: swapping one for the other is a
+# pure content change, exactly the "logo quietly replaced" case.
+LOGO_COLORS = {"logo_blue.png": (0, 90, 200), "logo_red.png": (200, 30, 30)}
+
+
+def make_logos(out: Path) -> dict[str, Path]:
+    """Write the tiny PNGs used by the image fixtures."""
+    from PIL import Image as PILImage
+
+    paths = {}
+    for name, color in LOGO_COLORS.items():
+        path = out / name
+        PILImage.new("RGB", (48, 48), color).save(path)
+        paths[name] = path
+    return paths
 
 
 def make_excel_baseline(path: Path) -> None:
@@ -82,6 +100,47 @@ def make_excel_bad_edit(baseline: Path, path: Path) -> None:
     wb.save(path)
 
 
+def make_excel_with_image(path: Path, logo: Path | None) -> None:
+    """A sheet whose only variable is the embedded logo (or its absence)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "表紙"
+    ws["A1"] = "架空市 表紙(サンプル)"
+    ws["A3"] = "承認印:"
+    if logo is not None:
+        ws.add_image(XLImage(str(logo)), "C3")
+    wb.save(path)
+
+
+def make_word_with_image(path: Path, logo: Path | None) -> None:
+    doc = Document()
+    doc.add_paragraph("架空市 表紙(サンプル)")
+    if logo is not None:
+        doc.add_picture(str(logo))
+    doc.add_paragraph("承認印: 上記のとおり")
+    doc.save(path)
+
+
+def make_word_reformatted(baseline: Path, path: Path) -> None:
+    """Text untouched, but rendered invisible: 4pt white.
+
+    No paragraph style changes, so only run-level formatting capture sees it.
+    """
+    doc = Document(str(baseline))
+    for run in doc.paragraphs[3].runs:
+        run.font.size = Pt(4)
+        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    doc.save(path)
+
+
+def make_word_inserted_paragraph(baseline: Path, path: Path) -> None:
+    """One paragraph inserted mid-document; every later one shifts down."""
+    doc = Document(str(baseline))
+    new = doc.add_paragraph("補足: 本節は追記された段落です。")
+    doc.paragraphs[1]._p.addnext(new._p)
+    doc.save(path)
+
+
 def make_word_baseline(path: Path) -> None:
     doc = Document()
     doc.add_heading("架空市 業務計画書(サンプル)", level=1)
@@ -118,9 +177,17 @@ def generate_all(out: Path = OUT) -> dict[str, Path]:
         "excel_baseline": out / "excel_baseline.xlsx",
         "excel_good": out / "excel_good.xlsx",
         "excel_bad": out / "excel_bad.xlsx",
+        "excel_image_baseline": out / "excel_image_baseline.xlsx",
+        "excel_image_swapped": out / "excel_image_swapped.xlsx",
+        "excel_image_removed": out / "excel_image_removed.xlsx",
         "word_baseline": out / "word_baseline.docx",
         "word_good": out / "word_good.docx",
         "word_bad": out / "word_bad.docx",
+        "word_reformatted": out / "word_reformatted.docx",
+        "word_inserted": out / "word_inserted.docx",
+        "word_image_baseline": out / "word_image_baseline.docx",
+        "word_image_swapped": out / "word_image_swapped.docx",
+        "word_image_removed": out / "word_image_removed.docx",
     }
     make_excel_baseline(paths["excel_baseline"])
     make_excel_good_edit(paths["excel_baseline"], paths["excel_good"])
@@ -128,6 +195,17 @@ def generate_all(out: Path = OUT) -> dict[str, Path]:
     make_word_baseline(paths["word_baseline"])
     make_word_good_edit(paths["word_baseline"], paths["word_good"])
     make_word_bad_edit(paths["word_baseline"], paths["word_bad"])
+    make_word_reformatted(paths["word_baseline"], paths["word_reformatted"])
+    make_word_inserted_paragraph(paths["word_baseline"], paths["word_inserted"])
+
+    logos = make_logos(out)
+    blue, red = logos["logo_blue.png"], logos["logo_red.png"]
+    make_excel_with_image(paths["excel_image_baseline"], blue)
+    make_excel_with_image(paths["excel_image_swapped"], red)
+    make_excel_with_image(paths["excel_image_removed"], None)
+    make_word_with_image(paths["word_image_baseline"], blue)
+    make_word_with_image(paths["word_image_swapped"], red)
+    make_word_with_image(paths["word_image_removed"], None)
     return paths
 
 

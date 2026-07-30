@@ -3,8 +3,13 @@ from __future__ import annotations
 from ..core.model import CheckResult
 
 
+def _escape(text: str) -> str:
+    """Keep a value from breaking out of its Markdown table cell."""
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
 def _cell(value) -> str:
-    text = repr(value).replace("|", "\\|").replace("\n", " ")
+    text = _escape(repr(value))
     return text if len(text) <= 60 else text[:60] + "..."
 
 
@@ -19,15 +24,19 @@ def render_markdown(result: CheckResult) -> str:
         f"{len(result.allowed)} allowed / {len(result.violations)} violations",
     ]
     if result.violations:
+        lines += [""]
+        if result.meta.get("policy_mode") == "review_only":
+            lines += ["> `mode: review_only` — reported for review, not blocking.", ""]
         lines += [
-            "",
             "| Severity | Location | Attribute | Old | New | Rule |",
             "|---|---|---|---|---|---|",
         ]
         for v in result.violations:
             lines.append(
-                f"| {v.severity} | `{v.change.location}` | {v.change.attribute} "
-                f"| {_cell(v.change.old)} | {_cell(v.change.new)} | {v.rule} |"
+                f"| {v.severity} | `{_escape(v.change.location)}` "
+                f"| {_escape(v.change.attribute)} "
+                f"| {_cell(v.change.old)} | {_cell(v.change.new)} "
+                f"| {_escape(v.rule)} |"
             )
     if result.semantic_mode != "off" and result.semantic_findings:
         lines += ["", f"### Semantic checks ({result.semantic_mode})", ""]

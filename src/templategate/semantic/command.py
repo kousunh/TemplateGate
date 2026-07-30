@@ -6,7 +6,7 @@ The policy sets e.g.::
       mode: review
       provider: command
       command: "claude -p"      # any CLI that reads stdin, prints JSON
-      model: ""                  # appended as $OFFICEGUARD_MODEL env var
+      model: ""                  # exported as $TEMPLATEGATE_MODEL
 
 The command receives a prompt on stdin and must print a JSON array:
 ``[{"check": "...", "verdict": "pass|fail|warning", "message": "..."}]``.
@@ -41,6 +41,24 @@ JSON array only, no prose: [{{"check": "<check>", "verdict": "pass|fail|warning"
 """
 
 
+def split_command(command: str, *, windows: bool | None = None) -> list[str]:
+    """Split a configured command line into argv.
+
+    POSIX splitting eats the backslashes in a Windows path, so on Windows the
+    line is split in non-POSIX mode and surrounding quotes are stripped by
+    hand — ``C:\\tools\\claude.exe -p`` has to survive intact.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        parts = shlex.split(command, posix=False)
+        return [
+            p[1:-1] if len(p) >= 2 and p[0] == p[-1] == '"' else p
+            for p in parts
+        ]
+    return shlex.split(command)
+
+
 class CommandProvider(SemanticProvider):
     name = "command"
 
@@ -50,7 +68,8 @@ class CommandProvider(SemanticProvider):
         baseline_text: str,
         candidate_text: str,
     ) -> list[SemanticFinding]:
-        if not config.command:
+        argv = split_command(config.command) if config.command else []
+        if not argv:
             return [SemanticFinding(
                 check="(configuration)",
                 verdict="error",
@@ -63,10 +82,10 @@ class CommandProvider(SemanticProvider):
         )
         env = dict(os.environ)
         if config.model:
-            env["OFFICEGUARD_MODEL"] = config.model
+            env["TEMPLATEGATE_MODEL"] = config.model
         try:
             proc = subprocess.run(
-                shlex.split(config.command),
+                argv,
                 input=prompt,
                 capture_output=True,
                 text=True,

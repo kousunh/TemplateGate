@@ -1,7 +1,7 @@
 import pytest
 
 from templategate.core.evaluator import evaluate
-from templategate.core.model import Change
+from templategate.core.model import SEVERITY_ERROR, SEVERITY_WARNING, Change
 from templategate.core.policy import PolicyError, parse_policy
 
 
@@ -51,6 +51,27 @@ def test_protect_beats_allow():
     allowed, violations = evaluate(changes, policy)
     assert not allowed
     assert violations[0].rule == "protected"
+
+
+def test_review_only_reports_without_failing():
+    """mode: review_only must list violations but keep the run green."""
+    policy = parse_policy({"target": "excel", "mode": "review_only"})
+    changes = [Change("Sheet1!C3", "value", old=1, new=2)]
+    allowed, violations = evaluate(changes, policy)
+    assert not allowed
+    assert [v.severity for v in violations] == [SEVERITY_WARNING]
+
+
+def test_normal_input_violations_are_errors():
+    policy = parse_policy({"target": "excel", "mode": "normal_input"})
+    changes = [Change("Sheet1!C3", "value", old=1, new=2)]
+    _allowed, violations = evaluate(changes, policy)
+    assert [v.severity for v in violations] == [SEVERITY_ERROR]
+
+
+def test_row_extension_mode_is_no_longer_accepted():
+    with pytest.raises(PolicyError):
+        parse_policy({"target": "excel", "mode": "row_extension"})
 
 
 def test_structural_ignore_drops_changes():

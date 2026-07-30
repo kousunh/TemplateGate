@@ -13,8 +13,17 @@ from pathlib import Path
 import yaml
 
 VALID_TARGETS = ("excel", "word", "auto")
-VALID_MODES = ("review_only", "normal_input", "page_extension", "row_extension")
+
+# review_only    — violations are reported as warnings and never fail the run.
+# normal_input   — the default: every violation is an error.
+# page_extension — Word only; paragraphs are aligned by content so inserting
+#                  one does not report every following paragraph as changed.
+VALID_MODES = ("review_only", "normal_input", "page_extension")
+
 VALID_SEMANTIC_MODES = ("off", "review", "gate")
+
+MODE_REVIEW_ONLY = "review_only"
+MODE_PAGE_EXTENSION = "page_extension"
 
 
 class PolicyError(ValueError):
@@ -143,7 +152,7 @@ SAMPLE_POLICY_EXCEL = """\
 # never by the agent that edited the document.
 version: 1
 target: excel
-mode: normal_input        # review_only | normal_input | page_extension | row_extension
+mode: normal_input        # review_only | normal_input | page_extension
 
 # Default deny: any change NOT matched below is a violation.
 allow:
@@ -174,7 +183,7 @@ SAMPLE_POLICY_WORD = """\
 # TemplateGate policy — trusted acceptance rules for a Word edit.
 version: 1
 target: word
-mode: normal_input
+mode: normal_input        # review_only | normal_input | page_extension
 
 allow:
   - selector: "p1-20"
@@ -182,7 +191,7 @@ allow:
 
 protect:
   - selector: "*"
-    attributes: [style, section, header_footer]
+    attributes: [style, format, section, header_footer]
 
 structural:
   images: strict

@@ -5,6 +5,9 @@ Order of precedence per change:
   2. matches a protect rule               -> violation ("protected")
   3. matches an allow rule                -> allowed
   4. otherwise                            -> violation ("not_allowed")
+
+Violations are errors, except under ``mode: review_only``, where they are
+reported as warnings so the run still passes.
 """
 
 from __future__ import annotations
@@ -16,9 +19,10 @@ from .model import (
     ATTR_TABLE,
     Change,
     SEVERITY_ERROR,
+    SEVERITY_WARNING,
     Violation,
 )
-from .policy import Policy
+from .policy import MODE_REVIEW_ONLY, Policy
 from .selector import match_attributes, match_selector
 
 # structural policy key -> change attribute it governs
@@ -37,6 +41,7 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
         for key, attr in _STRUCTURAL_ATTRS.items()
         if policy.structural_setting(key) == "ignore"
     }
+    severity = SEVERITY_WARNING if policy.mode == MODE_REVIEW_ONLY else SEVERITY_ERROR
 
     allowed: list[Change] = []
     violations: list[Violation] = []
@@ -54,7 +59,7 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
                 Violation(
                     change=change,
                     rule="protected",
-                    severity=SEVERITY_ERROR,
+                    severity=severity,
                     message=f"protected attribute '{change.attribute}' changed at {change.location}",
                 )
             )
@@ -72,7 +77,7 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
             Violation(
                 change=change,
                 rule="not_allowed",
-                severity=SEVERITY_ERROR,
+                severity=severity,
                 message=(
                     f"change to '{change.attribute}' at {change.location} "
                     "is not allowed by the policy (default deny)"

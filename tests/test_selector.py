@@ -43,6 +43,32 @@ def test_word_selectors():
     assert match_selector("section1", "section1#header_footer")
 
 
+def test_whole_column_and_row_selectors():
+    """Open-ended ranges report None boundaries and used to raise TypeError."""
+    assert match_selector("Sheet1!B:B", "Sheet1!B5")
+    assert match_selector("Sheet1!B:B", "Sheet1!B1048576")
+    assert not match_selector("Sheet1!B:B", "Sheet1!C5")
+    assert match_selector("Sheet1!A:Z", "Sheet1!C3")
+    assert not match_selector("Sheet1!A:Z", "Sheet1!AA3")
+    assert match_selector("Sheet1!4:4", "Sheet1!B4")
+    assert not match_selector("Sheet1!4:4", "Sheet1!B5")
+
+
+def test_sheet_names_containing_the_separator_characters():
+    assert match_selector("Q1#Draft!B2:B5", "Q1#Draft!B3")
+    assert not match_selector("Q1#Draft!B2:B5", "Q1#Draft!C3")
+    assert match_selector("Q1#Draft", "Q1#Draft!B3")
+    assert match_selector("Q1#Draft", "Q1#Draft#print")
+    assert not match_selector("Q1#Draft!B2:B5", "Q1#Draft#print")
+    assert match_selector("Hi!There", "Hi!There!B2")
+
+
+def test_sheet_level_kind_selectors():
+    assert match_selector("Sheet1#print", "Sheet1#print")
+    assert not match_selector("Sheet1#print", "Sheet1#header_footer")
+    assert not match_selector("Sheet1#print", "Sheet1!B2")
+
+
 def test_attribute_matching():
     assert match_attributes(["*"], "value")
     assert match_attributes(["value", "formula"], "value")

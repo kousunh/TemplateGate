@@ -21,19 +21,95 @@ from ..core.model import (
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
 
+def _similarity(b: dict, c: dict) -> float:
+    """Fraction of cell coordinates that are byte-identical between two sheets."""
+    b_cells, c_cells = b["cells"], c["cells"]
+    keys = b_cells.keys() | c_cells.keys()
+    if not keys:
+        return 1.0
+    same = sum(1 for k in keys if b_cells.get(k) == c_cells.get(k))
+    return same / len(keys)
+
+
+def _pair_renames(base_sheets: dict, cand_sheets: dict,
+                  removed: list[str], added: list[str]) -> list[tuple[str, str, float]]:
+    """Pair removed with added sheets, most-alike (then closest position) first.
+
+    A rename must never hide the sheet's contents, so every removed sheet is
+    paired while an added one is left — pairing is by best fit, not by a
+    similarity threshold, because a rename that also rewrites every cell is
+    exactly the case that has to stay visible.  The score rides along so the
+    report can distinguish a real rename from two unrelated sheets that merely
+    got paired up.
+    """
+    ranked = sorted(
+        (
+            (
+                -_similarity(base_sheets[r], cand_sheets[a]),
+                abs(base_sheets[r]["index"] - cand_sheets[a]["index"]),
+                r,
+                a,
+            )
+            for r in removed
+            for a in added
+        )
+    )
+    pairs: list[tuple[str, str, float]] = []
+    used_r: set[str] = set()
+    used_a: set[str] = set()
+    for score, _distance, r, a in ranked:
+        if r in used_r or a in used_a:
+            continue
+        used_r.add(r)
+        used_a.add(a)
+        pairs.append((r, a, -score))
+    return pairs
+
+
+# Above this share of identical cells a pairing is called a rename outright;
+# below it the sheets are still compared, but the wording stays neutral.
+_RENAME_SIMILARITY = 0.5
+
+
+def _rename_detail(plain: str, renamed: str, pair: tuple[str, float] | None) -> str:
+    if pair is None:
+        return f"sheet {plain}"
+    name, score = pair
+    if score >= _RENAME_SIMILARITY:
+        return f"sheet {renamed} {name!r}"
+    return f"sheet {plain}; contents compared against {name!r}"
+
+
 def diff_snapshots(base: dict, cand: dict) -> list[Change]:
     changes: list[Change] = []
 
     base_sheets, cand_sheets = base["sheets"], cand["sheets"]
-    for name in base_sheets.keys() - cand_sheets.keys():
+    removed = sorted(base_sheets.keys() - cand_sheets.keys())
+    added = sorted(cand_sheets.keys() - base_sheets.keys())
+    renames = _pair_renames(base_sheets, cand_sheets, removed, added)
+    renamed_to = {r: (a, score) for r, a, score in renames}
+    renamed_from = {a: (r, score) for r, a, score in renames}
+
+    for name in removed:
+        pair = renamed_to.get(name)
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old="present", new=None, detail="sheet removed"))
-    for name in cand_sheets.keys() - base_sheets.keys():
+                              old="present", new=pair[0] if pair else None,
+                              detail=_rename_detail("removed", "renamed to", pair)))
+    for name in added:
+        pair = renamed_from.get(name)
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old=None, new="present", detail="sheet added"))
+                              old=pair[0] if pair else None, new="present",
+                              detail=_rename_detail("added", "renamed from", pair)))
 
     for name in sorted(base_sheets.keys() & cand_sheets.keys()):
         changes.extend(_diff_sheet(name, base_sheets[name], cand_sheets[name]))
+
+    # A renamed sheet keeps being compared cell by cell, reported under its
+    # baseline name so that policy selectors written against the template
+    # still apply.
+    for old_name, new_name, _score in renames:
+        changes.extend(_diff_sheet(old_name, base_sheets[old_name],
+                                   cand_sheets[new_name], include_structure=False))
 
     for name in base.get("defined_names", {}).keys() | cand.get("defined_names", {}).keys():
         old = base.get("defined_names", {}).get(name)
@@ -48,16 +124,18 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
     return changes
 
 
-def _diff_sheet(name: str, b: dict, c: dict) -> list[Change]:
+def _diff_sheet(name: str, b: dict, c: dict, *,
+                include_structure: bool = True) -> list[Change]:
     changes: list[Change] = []
 
-    if b["index"] != c["index"]:
-        changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old=b["index"], new=c["index"], detail="sheet moved"))
-    if b["visibility"] != c["visibility"]:
-        changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old=b["visibility"], new=c["visibility"],
-                              detail="sheet visibility changed"))
+    if include_structure:
+        if b["index"] != c["index"]:
+            changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
+                                  old=b["index"], new=c["index"], detail="sheet moved"))
+        if b["visibility"] != c["visibility"]:
+            changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
+                                  old=b["visibility"], new=c["visibility"],
+                                  detail="sheet visibility changed"))
 
     for coord in sorted(b["cells"].keys() | c["cells"].keys()):
         old = b["cells"].get(coord, _DEFAULT_CELL)
@@ -79,11 +157,14 @@ def _diff_sheet(name: str, b: dict, c: dict) -> list[Change]:
 
     for attr, key in ((ATTR_CONDITIONAL_FORMATTING, "conditional_formatting"),
                       (ATTR_DATA_VALIDATION, "data_validation")):
-        for rng in b[key].keys() | c[key].keys():
+        for rng in sorted(b[key].keys() | c[key].keys()):
             old, new = b[key].get(rng), c[key].get(rng)
             if old != new:
-                changes.append(Change(f"{name}!{rng.split()[0]}", attr,
-                                      old=_short(old), new=_short(new)))
+                # A sqref may list several ranges ("B2:B5 D2:D5"); report each
+                # one, or a rule covering an unmentioned range slips through.
+                for part in str(rng).split() or [str(rng)]:
+                    changes.append(Change(f"{name}!{part}", attr,
+                                          old=_short(old), new=_short(new)))
 
     b_imgs = {(i["sha256"], tuple(i["anchor"]) if i["anchor"] else None,
                tuple(i["size"])) for i in b["images"]}
