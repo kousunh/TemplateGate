@@ -1,4 +1,4 @@
-"""Data model shared across DocGate.
+"""Data model shared across TemplateGate.
 
 A *snapshot* is a normalized dict extracted from a document.  Comparing two
 snapshots yields ``Change`` records; evaluating changes against a policy
@@ -87,7 +87,7 @@ class CheckResult:
 
     def to_dict(self) -> dict:
         return {
-            "tool": "docgate",
+            "tool": "templategate",
             "passed": self.passed,
             "target": self.target,
             "baseline": self.baseline,

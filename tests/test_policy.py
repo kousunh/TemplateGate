@@ -1,8 +1,8 @@
 import pytest
 
-from docgate.core.evaluator import evaluate
-from docgate.core.model import Change
-from docgate.core.policy import PolicyError, parse_policy
+from templategate.core.evaluator import evaluate
+from templategate.core.model import Change
+from templategate.core.policy import PolicyError, parse_policy
 
 
 def test_parse_minimal_policy():

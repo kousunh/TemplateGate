@@ -10,7 +10,7 @@ def _fmt(value) -> str:
 
 def render_text(result: CheckResult) -> str:
     lines = [
-        f"DocGate: {'PASS' if result.passed else 'FAIL'}",
+        f"TemplateGate: {'PASS' if result.passed else 'FAIL'}",
         f"  baseline : {result.baseline}",
         f"  candidate: {result.candidate}",
         f"  changes: {len(result.changes)} total, "

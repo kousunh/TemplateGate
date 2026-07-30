@@ -1,4 +1,4 @@
-"""DocGate command-line interface.
+"""TemplateGate command-line interface.
 
 Exit codes: 0 = PASS, 1 = FAIL, 2 = execution/configuration error.
 """
@@ -24,13 +24,13 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(
-        prog="docgate",
+        prog="templategate",
         description=(
             "Policy-as-code acceptance gate for AI-edited Office documents. "
             "Verifies that only intended changes were made to .xlsx/.xlsm/.docx files."
         ),
     )
-    parser.add_argument("--version", action="version", version=f"docgate {__version__}")
+    parser.add_argument("--version", action="version", version=f"templategate {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_check = sub.add_parser("check", help="check a candidate against a baseline using a policy")
@@ -53,16 +53,16 @@ def main(argv: list[str] | None = None) -> int:
 
     p_init = sub.add_parser("init", help="write a sample policy file")
     p_init.add_argument("--target", choices=["excel", "word"], default="excel")
-    p_init.add_argument("--output", default="docgate.policy.yaml")
+    p_init.add_argument("--output", default="templategate.policy.yaml")
 
     args = parser.parse_args(argv)
     try:
         return _dispatch(args)
     except PolicyError as exc:
-        print(f"docgate: policy error: {exc}", file=sys.stderr)
+        print(f"templategate: policy error: {exc}", file=sys.stderr)
         return 2
     except (ValueError, OSError) as exc:
-        print(f"docgate: error: {exc}", file=sys.stderr)
+        print(f"templategate: error: {exc}", file=sys.stderr)
         return 2
 
 
@@ -107,7 +107,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         sample = SAMPLE_POLICY_EXCEL if args.target == "excel" else SAMPLE_POLICY_WORD
         path = Path(args.output)
         if path.exists():
-            print(f"docgate: {path} already exists, not overwriting", file=sys.stderr)
+            print(f"templategate: {path} already exists, not overwriting", file=sys.stderr)
             return 2
         path.write_text(sample, encoding="utf-8")
         print(f"sample {args.target} policy written to {path}")

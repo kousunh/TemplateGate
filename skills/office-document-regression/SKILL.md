@@ -2,12 +2,12 @@
 name: office-document-regression
 description: >
   Safely edit Excel (.xlsx/.xlsm) or Word (.docx) documents and verify the
-  result with DocGate. Use whenever asked to modify an Office document
+  result with TemplateGate. Use whenever asked to modify an Office document
   that must keep its structure, formulas, or formatting intact — before
   handing the edited file back, always run the acceptance check.
 ---
 
-# Office document regression check (DocGate)
+# Office document regression check (TemplateGate)
 
 You are editing an Office document whose structure must not break. Follow
 this workflow exactly.
@@ -25,7 +25,7 @@ this workflow exactly.
 4. **Run the check:**
 
    ```bash
-   docgate check --baseline <original> --candidate <edited> \
+   templategate check --baseline <original> --candidate <edited> \
      --policy <policy.yaml> --report json
    ```
 
@@ -55,7 +55,7 @@ this workflow exactly.
 ## Useful commands
 
 ```bash
-docgate diff --baseline a.xlsx --candidate b.xlsx --json  # inspect all changes
-docgate snapshot file.xlsx                                 # what DocGate sees
-docgate init --target excel                                # policy template (draft for the user)
+templategate diff --baseline a.xlsx --candidate b.xlsx --json  # inspect all changes
+templategate snapshot file.xlsx                                 # what TemplateGate sees
+templategate init --target excel                                # policy template (draft for the user)
 ```

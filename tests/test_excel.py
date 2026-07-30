@@ -1,4 +1,4 @@
-from docgate import check, diff, snapshot
+from templategate import check, diff, snapshot
 
 
 def test_snapshot_contents(fixtures):
@@ -46,11 +46,11 @@ def test_bad_edit_fails_with_expected_violations(fixtures):
 def test_result_json_roundtrip(fixtures):
     import json
 
-    from docgate.reporters import render_json
+    from templategate.reporters import render_json
 
     result = check(fixtures["excel_baseline"], fixtures["excel_bad"],
                    fixtures["excel_policy"])
     data = json.loads(render_json(result))
-    assert data["tool"] == "docgate"
+    assert data["tool"] == "templategate"
     assert data["passed"] is False
     assert data["summary"]["violations"] == len(result.violations)

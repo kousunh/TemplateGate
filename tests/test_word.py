@@ -1,4 +1,4 @@
-from docgate import check, diff, snapshot
+from templategate import check, diff, snapshot
 
 
 def test_snapshot_contents(fixtures):

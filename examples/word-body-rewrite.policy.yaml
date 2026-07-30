@@ -21,7 +21,7 @@ semantic:
   mode: review            # findings are warnings; they never flip PASS/FAIL
   provider: command
   command: ""             # e.g. "claude -p" or any CLI that reads stdin & prints JSON
-  model: ""               # your choice — DocGate does not pin a vendor
+  model: ""               # your choice — TemplateGate does not pin a vendor
   checks:
     - "日付や期間に矛盾がないこと"
     - "旧名称が本文に残っていないこと"

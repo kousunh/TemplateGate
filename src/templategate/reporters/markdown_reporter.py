@@ -11,7 +11,7 @@ def _cell(value) -> str:
 def render_markdown(result: CheckResult) -> str:
     status = "✅ PASS" if result.passed else "❌ FAIL"
     lines = [
-        f"## DocGate: {status}",
+        f"## TemplateGate: {status}",
         "",
         f"- Baseline: `{result.baseline}`",
         f"- Candidate: `{result.candidate}`",

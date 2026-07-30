@@ -8,7 +8,7 @@ Three modes, chosen in the policy (or overridden on the CLI):
            the PASS/FAIL outcome.
   gate   — semantic findings with verdict "fail" cause the check to FAIL.
 
-Providers are pluggable so users choose their own model/vendor; DocGate
+Providers are pluggable so users choose their own model/vendor; TemplateGate
 does not pin one.
 """
 

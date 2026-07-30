@@ -1,4 +1,4 @@
-name: "DocGate"
+name: "TemplateGate"
 description: >
   Policy-as-code acceptance gate for AI-edited Office documents.
   Fails the job if the candidate document contains changes the policy
@@ -29,9 +29,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install DocGate
+    - name: Install TemplateGate
       shell: bash
-      run: python -m pip install --quiet docgate
+      run: python -m pip install --quiet templategate
     - name: Run check
       shell: bash
       run: |
@@ -43,9 +43,9 @@ runs:
         if [ -n "${{ inputs.semantic }}" ]; then
           ARGS+=(--semantic "${{ inputs.semantic }}")
         fi
-        docgate "${ARGS[@]}" | tee docgate-report.txt
+        templategate "${ARGS[@]}" | tee templategate-report.txt
         STATUS=${PIPESTATUS[0]}
         if [ "${{ inputs.report }}" = "markdown" ]; then
-          cat docgate-report.txt >> "$GITHUB_STEP_SUMMARY"
+          cat templategate-report.txt >> "$GITHUB_STEP_SUMMARY"
         fi
         exit "$STATUS"

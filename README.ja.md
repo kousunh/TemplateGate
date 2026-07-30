@@ -1,11 +1,11 @@
-# DocGate
+# TemplateGate
 
 **AIが編集した Excel・Word 文書のための、Policy-as-code 受入ゲート。**
 
 English version: [README.md](README.md)
 
 Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の編集が得意ですが、
-ときどき数式・結合セル・印刷レイアウトを壊します。DocGate は
+ときどき数式・結合セル・印刷レイアウトを壊します。TemplateGate は
 `.xlsx` / `.xlsm` / `.docx` のための**読み取り専用の回帰テスト**です。
 編集前(Baseline)と編集後(Candidate)を比較し、
 **ポリシーで許可した変更だけが行われたこと**を検証します。
@@ -16,7 +16,7 @@ Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の�
   ヘッダーフッター・印刷設定・VBA・Wordの段落/表/セクション。
 - **意味解析は任意** — `off`(既定。文書内容は一切外部送信されない)/
   `review`(警告のみ)/ `gate`(合否判定に含める)。モデル・ベンダーは利用者が選択。
-- **編集ツールではない** — DocGate は文書を一切変更せず、自動修復もしません。
+- **編集ツールではない** — TemplateGate は文書を一切変更せず、自動修復もしません。
   FAILした候補は破棄し、最終判断は人間が行います。
 
 ## 信頼境界
@@ -28,7 +28,7 @@ Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の�
 ## インストール
 
 ```bash
-pip install docgate
+pip install templategate
 ```
 
 Python 3.10+。依存は openpyxl / python-docx / PyYAML のみ。
@@ -37,15 +37,15 @@ Python 3.10+。依存は openpyxl / python-docx / PyYAML のみ。
 
 ```bash
 # 1. ポリシーの雛形を生成して編集
-docgate init --target excel
+templategate init --target excel
 
 # 2. AIには文書の「コピー」を編集させる
 
 # 3. 結果を検査
-docgate check \
+templategate check \
   --baseline 計画書2026.xlsx \
   --candidate 計画書2026_編集後.xlsx \
-  --policy docgate.policy.yaml \
+  --policy templategate.policy.yaml \
   --report text
 ```
 
@@ -72,16 +72,16 @@ semantic:
 その他のコマンド:
 
 ```bash
-docgate diff --baseline a.xlsx --candidate b.xlsx   # ポリシーなしで全変更を一覧
-docgate snapshot file.docx                           # 構造スナップショットをJSON出力
+templategate diff --baseline a.xlsx --candidate b.xlsx   # ポリシーなしで全変更を一覧
+templategate snapshot file.docx                           # 構造スナップショットをJSON出力
 ```
 
 ## Python API
 
 ```python
-import docgate
+import templategate
 
-result = docgate.check("baseline.xlsx", "candidate.xlsx", "policy.yaml")
+result = templategate.check("baseline.xlsx", "candidate.xlsx", "policy.yaml")
 if not result.passed:
     for v in result.violations:
         print(v.change.location, v.change.attribute, v.message)
@@ -90,11 +90,11 @@ if not result.passed:
 ## AIエージェント向け
 
 `skills/office-document-regression/` に Agent Skill(Claude Code / Codex /
-ChatGPT 互換)が入っています。「コピーを編集 → `docgate check` を実行 →
+ChatGPT 互換)が入っています。「コピーを編集 → `templategate check` を実行 →
 JSONレポートを解釈 → **FAILを通すためにポリシーを書き換えることは絶対にしない**」
 という安全な作業手順をエージェントに教えます。
 
-## DocGate がやらないこと
+## TemplateGate がやらないこと
 
 - 編集・変換・自動修復
 - 別のOfficeアプリで保存し直した際の差分の正規化(Round-trip)
@@ -105,6 +105,6 @@ JSONレポートを解釈 → **FAILを通すためにポリシーを書き換�
 
 MIT。[LICENSE](LICENSE) を参照。
 
-DocGate は独立したオープンソースプロジェクトであり、Microsoft とは
+TemplateGate は独立したオープンソースプロジェクトであり、Microsoft とは
 無関係です。「Microsoft」「Office」「Excel」「Word」は Microsoft Corporation の
 商標であり、本プロジェクトではファイル形式の識別のためにのみ言及しています。
