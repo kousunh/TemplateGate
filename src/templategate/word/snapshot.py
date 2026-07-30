@@ -1,46 +1,19 @@
-"""Word (.docx) snapshot extraction (read-only)."""
+"""Word (.docx) snapshot extraction (read-only).
+
+Content comes from the XML (see content.py), not from python-docx's object
+graph, which silently omits whole classes of container.  python-docx is still
+used to open the package, resolve style names and reach the relationships.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import zipfile
 from pathlib import Path
 
 from docx import Document
 
 from ..core.package import list_part_names, take_package_snapshot
-
-
-def _s(value) -> str:
-    """Stringify a font property so signatures stay comparable and sortable."""
-    return "" if value is None else str(value)
-
-
-def _run_format(run) -> tuple[str, ...]:
-    """Normalize one run's direct formatting into a comparable tuple."""
-    f = run.font
-    color = f.color
-    return (
-        _s(f.name),
-        _s(int(f.size) if f.size is not None else None),
-        _s(f.bold), _s(f.italic), _s(f.underline), _s(f.strike),
-        _s(f.subscript), _s(f.superscript), _s(f.all_caps), _s(f.small_caps),
-        _s(getattr(color, "rgb", None)),
-        _s(getattr(color, "theme_color", None)),
-        _s(f.highlight_color),
-    )
-
-
-def _format_key(paragraph) -> list[tuple[str, ...]]:
-    """The set of distinct run formats used in a paragraph.
-
-    Deduplicated and sorted on purpose: re-flowing the same text across a
-    different number of runs is not a formatting change, while making any of
-    the text bold, white, 4pt or highlighted is.  Keeping it independent of
-    run boundaries means an allowed text edit does not also report a
-    spurious format change.
-    """
-    return sorted({_run_format(r) for r in paragraph.runs})
+from .content import walk_body
 
 
 def _section(sec) -> dict:
@@ -69,44 +42,70 @@ def _header_footer_text(sec) -> dict:
     return out
 
 
+_BLIP = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_IMAGEDATA = "{urn:schemas-microsoft-com:vml}imagedata"
+_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+
+def _displayed_images(doc) -> list[str]:
+    """Hashes of the images the document actually shows.
+
+    Comparing the media folder instead would miss a picture deleted from the
+    page whose bytes are still sitting in the package — the file looks the
+    same size, and the logo is gone.
+    """
+    parts = [doc.part]
+    for section in doc.sections:
+        for source in (section.header, section.footer,
+                       section.even_page_header, section.even_page_footer,
+                       section.first_page_header, section.first_page_footer):
+            if source is not None and not source.is_linked_to_previous:
+                parts.append(source.part)
+
+    hashes: list[str] = []
+    for part in parts:
+        element = getattr(part, "element", None)
+        if element is None:
+            continue
+        references = [
+            reference.get(_R + "embed") or reference.get(_R + "link")
+            for reference in element.iter(_BLIP)
+        ] + [
+            reference.get(_R + "id") for reference in element.iter(_IMAGEDATA)
+        ]
+        for rel_id in references:
+            if not rel_id or rel_id not in part.rels:
+                continue
+            relationship = part.rels[rel_id]
+            if relationship.is_external:
+                hashes.append(f"external:{relationship.target_ref}")
+                continue
+            try:
+                hashes.append(hashlib.sha256(relationship.target_part.blob).hexdigest())
+            except Exception:
+                continue
+    return sorted(hashes)
+
+
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     doc = Document(str(path))
 
-    paragraphs = [
-        {
-            "text": p.text,
-            "style": p.style.name if p.style else None,
-            "format": _format_key(p),
-        }
-        for p in doc.paragraphs
-    ]
+    style_names = {}
+    for style in doc.styles:
+        style_id = getattr(style, "style_id", None)
+        if style_id:
+            style_names[style_id] = style.name
 
-    tables = []
-    for table in doc.tables:
-        rows = [[cell.text for cell in row.cells] for row in table.rows]
-        cell_formats = [
-            [sorted({fmt for p in cell.paragraphs for fmt in _format_key(p)})
-             for cell in row.cells]
-            for row in table.rows
-        ]
-        tables.append({
-            "style": table.style.name if table.style else None,
-            "rows": rows,
-            "cell_formats": cell_formats,
-        })
+    paragraphs, tables, blocks = walk_body(doc.element.body, style_names)
 
     sections = [_section(sec) for sec in doc.sections]
     header_footer = [_header_footer_text(sec) for sec in doc.sections]
-
-    images = []
-    with zipfile.ZipFile(path) as zf:
-        for name in zf.namelist():
-            if name.startswith("word/media/"):
-                images.append(hashlib.sha256(zf.read(name)).hexdigest())
+    images = _displayed_images(doc)
 
     return {
         "target": "word",
+        "blocks": blocks,
         "format": "docx",
         "paragraphs": paragraphs,
         "tables": tables,

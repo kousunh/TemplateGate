@@ -39,6 +39,21 @@ ATTR_CUSTOM_XML = "custom_xml"
 ATTR_PARTS = "parts"
 ATTR_LINKS = "links"
 
+# Surfaces that decide what a reader can see or change, rather than what the
+# document says.
+ATTR_PROTECTION = "protection"
+ATTR_SHEET_SETTINGS = "sheet_settings"
+ATTR_LAYOUT = "layout"
+
+# Word surfaces that live below the text: how a paragraph is laid out, what a
+# field computes, where a cross-reference points, and whether an edit was
+# recorded as a tracked change.
+ATTR_PARAGRAPH_FORMAT = "paragraph_format"
+ATTR_FIELD = "field"
+ATTR_BOOKMARK = "bookmark"
+ATTR_REVISION = "revision"
+ATTR_CONTENT_CONTROL = "content_control"
+
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 

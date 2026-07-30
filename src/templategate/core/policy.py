@@ -164,7 +164,8 @@ allow:
 protect:
   - selector: "*"
     attributes: [formula, format, merge, conditional_formatting,
-                 data_validation, print_settings, header_footer, vba]
+                 data_validation, print_settings, header_footer, vba,
+                 protection, sheet_settings, layout]
 
 structural:
   sheets: strict           # strict | ignore
@@ -199,8 +200,11 @@ allow:
     attributes: [text]
 
 protect:
+  # "body"/"p<N>" cover body paragraphs only; content controls and text boxes
+  # are addressed as sdt<N> / textbox<N>, so they are protected by "*" here.
   - selector: "*"
-    attributes: [style, format, section, header_footer]
+    attributes: [style, format, paragraph_format, section, header_footer,
+                 field, bookmark, revision, content_control, table]
 
 structural:
   images: strict

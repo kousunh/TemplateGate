@@ -13,6 +13,7 @@ import hashlib
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -80,6 +81,29 @@ def _plain(value):
     return f"{type(value).__name__}:{value}"
 
 
+def _rich_runs(value) -> tuple | None:
+    """Per-run formatting of a rich-text cell, or None for a plain one.
+
+    A cell can hold several differently formatted runs; the cell-level style
+    describes none of them, so turning one run white leaves every other
+    fingerprint untouched.
+    """
+    if not isinstance(value, CellRichText):
+        return None
+    runs = []
+    for item in value:
+        if isinstance(item, TextBlock):
+            f = item.font
+            runs.append((
+                item.text, _plain(f.b), _plain(f.i), _plain(f.u), _plain(f.sz),
+                _plain(f.rFont), _plain(getattr(f.color, "rgb", None)
+                                        if f.color is not None else None),
+            ))
+        else:
+            runs.append((str(item), None, None, None, None, None, None))
+    return tuple(runs)
+
+
 def _formula_of(value):
     """The canonical formula carried by a cell value, or None."""
     if isinstance(value, ArrayFormula):
@@ -96,7 +120,10 @@ def _cells(ws_formula, ws_value) -> dict:
     for row in ws_formula.iter_rows():
         for cell in row:
             formula = _formula_of(cell.value)
+            runs = _rich_runs(cell.value)
             fmt = _format_key(cell)
+            if runs is not None:
+                fmt = (fmt, ("runs", runs))
             cached = ws_value[cell.coordinate].value if formula else cell.value
             cached = _plain(cached)
             if cached is None and formula is None and fmt is None:
@@ -107,6 +134,30 @@ def _cells(ws_formula, ws_value) -> dict:
                 "format": fmt,
             }
     return cells
+
+
+def _dxf_key(dxf) -> tuple | None:
+    """The styling a conditional-format rule applies when it fires.
+
+    Without this a rule keeps its condition and loses its highlight — the
+    warning still 'works', it just no longer shows.
+    """
+    if dxf is None:
+        return None
+    font, fill, border = dxf.font, dxf.fill, dxf.border
+    return (
+        ("font", getattr(font, "b", None), getattr(font, "i", None),
+         _color(getattr(font, "color", None))) if font is not None else None,
+        ("fill", getattr(fill, "patternType", None),
+         _color(getattr(fill, "fgColor", None)),
+         _color(getattr(fill, "bgColor", None))) if fill is not None else None,
+        ("border", _side(getattr(border, "left", None)),
+         _side(getattr(border, "right", None)),
+         _side(getattr(border, "top", None)),
+         _side(getattr(border, "bottom", None))) if border is not None else None,
+        ("numfmt", getattr(dxf.numFmt, "formatCode", None)
+         if dxf.numFmt is not None else None),
+    )
 
 
 def _conditional_formatting(ws) -> dict:
@@ -120,6 +171,7 @@ def _conditional_formatting(ws) -> dict:
                 tuple(getattr(rule, "formula", None) or []),
                 getattr(rule, "text", None),
                 bool(getattr(rule, "stopIfTrue", False)),
+                _dxf_key(getattr(rule, "dxf", None)),
             ))
         out[str(cf.sqref)] = sorted(map(repr, rules))
     return out
@@ -131,7 +183,51 @@ def _data_validation(ws) -> dict:
         out[str(dv.sqref)] = (
             dv.type, dv.operator, dv.formula1, dv.formula2,
             bool(dv.allowBlank), dv.showDropDown,
+            # How hard the rule pushes back.  Turning errorStyle from "stop"
+            # to "information" leaves the rule in place but lets anything through.
+            dv.errorStyle, bool(dv.showErrorMessage), bool(dv.showInputMessage),
+            dv.errorTitle, dv.error, dv.promptTitle, dv.prompt,
         )
+    return out
+
+
+def _protection(ws) -> tuple:
+    p = ws.protection
+    return tuple(
+        _plain(getattr(p, name, None))
+        for name in ("sheet", "objects", "scenarios", "formatCells",
+                     "formatColumns", "formatRows", "insertColumns",
+                     "insertRows", "deleteColumns", "deleteRows",
+                     "selectLockedCells", "selectUnlockedCells", "sort",
+                     "autoFilter", "pivotTables")
+    ) + (bool(getattr(p, "password", None)),)
+
+
+def _sheet_settings(ws) -> tuple:
+    """Sheet-level view state that changes what a reader can see or do."""
+    return (
+        ("freeze_panes", _plain(ws.freeze_panes)),
+        ("auto_filter", _plain(ws.auto_filter.ref)),
+        ("tab_color", _color(ws.sheet_properties.tabColor)),
+        ("gridlines", _plain(getattr(ws.sheet_view, "showGridLines", None))),
+        ("zoom", _plain(getattr(ws.sheet_view, "zoomScale", None))),
+        ("right_to_left", _plain(getattr(ws.sheet_view, "rightToLeft", None))),
+    )
+
+
+def _layout(ws) -> dict:
+    """Row heights and column widths, and which of them are hidden.
+
+    A hidden row is not a deleted row: the numbers are still in the file and
+    still feed every formula, they just stop being on the page.
+    """
+    out: dict[str, tuple] = {}
+    for index, dim in ws.row_dimensions.items():
+        if dim.hidden or dim.height is not None:
+            out[f"{index}:{index}"] = (bool(dim.hidden), _plain(dim.height))
+    for letter, dim in ws.column_dimensions.items():
+        if dim.hidden or dim.width is not None:
+            out[f"{letter}:{letter}"] = (bool(dim.hidden), _plain(dim.width))
     return out
 
 
@@ -188,6 +284,10 @@ _EMPTY_SHEET = {
     "images": [],
     "header_footer": {},
     "print": {},
+    "protection": (),
+    "settings": (),
+    "layout": {},
+    "defined_names": {},
 }
 
 
@@ -215,12 +315,19 @@ def _sheet_snapshot(ws, index: int, wb_value) -> dict:
         "images": _images(ws),
         "header_footer": _header_footer(ws),
         "print": _print_settings(ws),
+        "protection": _protection(ws),
+        "settings": _sheet_settings(ws),
+        "layout": _layout(ws),
+        # Sheet-scoped names are a separate namespace from the workbook's:
+        # two sheets may each define "Rates" pointing somewhere different.
+        "defined_names": {name: dn.value
+                          for name, dn in ws.defined_names.items()},
     }
 
 
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
-    wb_formula = load_workbook(path, data_only=False)
+    wb_formula = load_workbook(path, data_only=False, rich_text=True)
     wb_value = load_workbook(path, data_only=True)
 
     sheets: dict[str, dict] = {}
@@ -237,6 +344,9 @@ def take_snapshot(path: str | Path) -> dict:
         "format": path.suffix.lstrip(".").lower(),
         "sheets": sheets,
         "defined_names": defined_names,
+        "settings": (("calc_mode", _plain(wb_formula.calculation.calcMode)),
+                     ("full_calc_on_load",
+                      _plain(wb_formula.calculation.fullCalcOnLoad))),
         "package": take_package_snapshot(path),
         "part_names": list_part_names(path),
     }

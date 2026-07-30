@@ -291,6 +291,215 @@ def test_worksheet_replaced_by_chartsheet_is_reported(tmp_path):
     assert "sheet kind changed" in details
 
 
+# --- the surface that does not show up in a cell -------------------------
+
+STRICT_EXCEL = parse_policy({
+    "target": "excel",
+    "protect": [{"selector": "*", "attributes": ["*"]}],
+})
+
+
+def _edited(tmp_path, build, edit):
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    build(baseline)
+    from openpyxl import load_workbook as _load
+
+    workbook = _load(baseline)
+    edit(workbook)
+    workbook.save(candidate)
+    return baseline, candidate
+
+
+def _two_rows(path):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    for row, (item, qty) in enumerate([("Widget", 10), ("Gadget", 5)], start=2):
+        ws[f"A{row}"], ws[f"B{row}"] = item, qty
+    wb.save(path)
+
+
+def _attributes(changes):
+    out = {}
+    for change in changes:
+        out.setdefault(change.attribute, set()).add(change.location)
+    return out
+
+
+def test_hidden_rows_and_columns_are_compared(tmp_path):
+    """A hidden row still feeds every formula; it just leaves the page."""
+    def hide(wb):
+        wb["Sheet1"].row_dimensions[3].hidden = True
+        wb["Sheet1"].column_dimensions["B"].hidden = True
+
+    baseline, candidate = _edited(tmp_path, _two_rows, hide)
+    assert _attributes(diff(baseline, candidate))["layout"] == {
+        "Sheet1!3:3", "Sheet1!B:B"
+    }
+    assert not check(baseline, candidate, STRICT_EXCEL).passed
+
+
+def test_column_width_change_is_compared(tmp_path):
+    def widen(wb):
+        wb["Sheet1"].column_dimensions["A"].width = 3
+
+    baseline, candidate = _edited(tmp_path, _two_rows, widen)
+    assert _attributes(diff(baseline, candidate))["layout"] == {"Sheet1!A:A"}
+
+
+def test_layout_is_addressable_by_range_selector(tmp_path):
+    """Row and column locations are ordinary A1 refs, so selectors reach them."""
+    def hide(wb):
+        wb["Sheet1"].column_dimensions["B"].hidden = True
+
+    baseline, candidate = _edited(tmp_path, _two_rows, hide)
+    policy = parse_policy({
+        "target": "excel",
+        "allow": [{"selector": "Sheet1!B:B", "attributes": ["layout"]}],
+    })
+    assert check(baseline, candidate, policy).passed
+
+
+def test_sheet_protection_removal_is_compared(tmp_path):
+    def build(path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "locked"
+        ws.protection.sheet = True
+        wb.save(path)
+
+    baseline, candidate = _edited(
+        tmp_path, build, lambda wb: setattr(wb["Sheet1"].protection, "sheet", False))
+    assert _attributes(diff(baseline, candidate))["protection"] == {
+        "Sheet1#protection"
+    }
+    assert not check(baseline, candidate, STRICT_EXCEL).passed
+
+
+def test_sheet_scoped_defined_name_is_compared(tmp_path):
+    from openpyxl.workbook.defined_name import DefinedName
+
+    def build(path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A2"] = 1
+        ws.defined_names["LocalRange"] = DefinedName(
+            "LocalRange", attr_text="Sheet1!$A$2:$A$4")
+        wb.save(path)
+
+    def retarget(wb):
+        wb["Sheet1"].defined_names["LocalRange"] = DefinedName(
+            "LocalRange", attr_text="Sheet1!$A$2:$A$2")
+
+    baseline, candidate = _edited(tmp_path, build, retarget)
+    assert _attributes(diff(baseline, candidate))["defined_names"] == {
+        "name:Sheet1!LocalRange"
+    }
+
+
+def test_data_validation_enforcement_is_compared(tmp_path):
+    """A rule downgraded from "stop" to "information" lets anything through."""
+    def build(path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        validation = DataValidation(type="whole", operator="between",
+                                    formula1="1", formula2="100")
+        validation.errorStyle = "stop"
+        validation.showErrorMessage = True
+        ws.add_data_validation(validation)
+        validation.add("B2:B4")
+        wb.save(path)
+
+    def defang(wb):
+        validation = wb["Sheet1"].data_validations.dataValidation[0]
+        validation.errorStyle = "information"
+        validation.showErrorMessage = False
+
+    baseline, candidate = _edited(tmp_path, build, defang)
+    assert _attributes(diff(baseline, candidate))["data_validation"] == {
+        "Sheet1!B2:B4"
+    }
+
+
+def test_conditional_format_styling_is_compared(tmp_path):
+    """The rule still fires; it just stopped highlighting anything."""
+    def build_with(color, path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws.conditional_formatting.add("B2:B4", CellIsRule(
+            operator="greaterThan", formula=["8"],
+            fill=PatternFill(start_color=color, end_color=color, fill_type="solid")))
+        wb.save(path)
+
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    build_with("FFC7CE", baseline)
+    build_with("FFFFFF", candidate)
+    assert _attributes(diff(baseline, candidate))["conditional_formatting"] == {
+        "Sheet1!B2:B4"
+    }
+
+
+def test_rich_text_run_formatting_is_compared(tmp_path):
+    """One run turned white inside a cell whose text never changed."""
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    def build_with(font, path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = CellRichText([TextBlock(font, "APPROVED"), " by finance"])
+        wb.save(path)
+
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    build_with(InlineFont(b=True), baseline)
+    build_with(InlineFont(b=True, color="FFFFFF"), candidate)
+
+    changes = _attributes(diff(baseline, candidate))
+    assert changes["format"] == {"Sheet1!A1"}
+    assert "value" not in changes
+
+
+def test_sheet_settings_are_compared(tmp_path):
+    def build(path):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "x"
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = "A1:B3"
+        ws.sheet_properties.tabColor = "FF0000"
+        wb.save(path)
+
+    def loosen(wb):
+        ws = wb["Sheet1"]
+        ws.freeze_panes = None
+        ws.auto_filter.ref = None
+        ws.sheet_properties.tabColor = "00FF00"
+
+    baseline, candidate = _edited(tmp_path, build, loosen)
+    assert _attributes(diff(baseline, candidate))["sheet_settings"] == {
+        "Sheet1#settings"
+    }
+
+
+def test_workbook_calculation_mode_is_compared(tmp_path):
+    """Manual calculation leaves every formula showing a stale answer."""
+    baseline, candidate = _edited(
+        tmp_path, _two_rows,
+        lambda wb: setattr(wb.calculation, "calcMode", "manual"))
+    assert _attributes(diff(baseline, candidate))["sheet_settings"] == {
+        "workbook#settings"
+    }
+
+
 def test_result_json_roundtrip(fixtures):
     import json
 
