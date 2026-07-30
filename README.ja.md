@@ -1,10 +1,10 @@
 # TemplateGate
 
+[English](README.md) | **日本語**
+
 [![CI](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml/badge.svg)](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml)
 
 **AIが編集した Excel・Word 文書のための、Policy-as-code 受入ゲート。**
-
-English version: [README.md](README.md)
 
 Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の編集が得意ですが、
 ときどき数式・結合セル・印刷レイアウトを壊します。TemplateGate は

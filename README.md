@@ -1,10 +1,10 @@
 # TemplateGate
 
+**English** | [日本語](README.ja.md)
+
 [![CI](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml/badge.svg)](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml)
 
 **Policy-as-code acceptance gate for AI-edited Excel & Word documents.**
-
-日本語版は [README.ja.md](README.ja.md) をどうぞ。
 
 AI agents (Claude Code, Codex, ChatGPT, ...) are great at editing Excel and Word
 files — and occasionally destroy a formula, a merged cell, or a print layout
