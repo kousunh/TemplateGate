@@ -5,8 +5,14 @@ Excel selectors:
     "Sheet1"              anything on that sheet (cells, images, print, ...)
     "Sheet1!B2"           a single cell
     "Sheet1!B2:D100"      cells within a range
+    "Sheet1!B:B" / "4:4"  a whole column / row (also matches layout changes)
+    "'Q1!Q4'!A1"          quoted sheet name, needed when it contains ' ! or #
+    "Sheet1#protection"   sheet protection
+    "Sheet1#settings"     freeze panes / autofilter / tab colour / view
+    "workbook#settings"   workbook-level settings (calculation mode)
+    "workbook#format"     workbook file format (.xlsm vs .xlsx)
     "sheet:*"             sheet-structure locations
-    "name:*"              defined-name locations
+    "name:*"              defined names (workbook and sheet scope)
     "vba"                 the VBA project
 
 Word selectors:
@@ -14,13 +20,16 @@ Word selectors:
     "body"                any paragraph (p<N>)
     "p3" / "p3-10"        paragraph index or range (1-based)
     "table2"              a whole table (structure and its cells)
-    "table2!r1c2"         a single table cell
+    "table2!r1c2"         a single table cell (nested: "table1!r1c1!table1!r1c1")
+    "sdt1" / "textbox1"   content controls and text boxes
     "section1"            a section (page setup / header / footer)
 
 OOXML package parts (both targets):
     "package#*"                          any package part
     "package#charts:*"                   any part in one category
     "package#charts:xl/charts/chart1.xml"  one specific part
+    "package#parts:<partname>"           catch-all part inventory (and #extLst)
+    "package#links:<url>"                external relationship targets
 
 Locations are produced by the extractors (see excel/diff.py, word/diff.py and
 core/package.py).

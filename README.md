@@ -19,11 +19,17 @@ policy allows were made**.
   content hash / position / size), headers & footers, print settings, VBA,
   Word paragraphs / tables / sections.
 - **Catches what editing tools silently throw away** — charts, pivot tables,
-  comments, embedded objects, custom XML, and Excel shapes & textboxes are read
-  straight out of the document's internal package. That means damage is caught
-  even when the tool that made the edit could not represent those parts in the
-  first place — the failure mode where you get a file back that opens fine and
-  looks fine, minus its charts.
+  comments, embedded objects, custom XML, Excel shapes & textboxes, and every
+  other part of the file besides. Parts are read straight out of the document's
+  internal package, so damage is caught even when the tool that made the edit
+  could not represent those parts in the first place — the failure mode where
+  you get a file back that opens fine and looks fine, minus its charts. A part
+  nobody recognises still counts: unknown is not the same as allowed.
+- **Catches what you cannot see** — a row quietly hidden, a sheet left
+  unlocked, a workbook switched to manual calculation so every formula shows a
+  stale answer, a hyperlink repointed while its display text stays put, body
+  text set to 4pt white. Edits made as tracked changes are visible too: an
+  insertion is text on the page, so it is reported as one.
 - **Optional semantic checks** — `off` (default; nothing ever leaves your
   machine), `review` (AI findings as warnings), or `gate` (AI findings affect
   PASS/FAIL). Bring your own model — TemplateGate does not pin a vendor.
@@ -71,6 +77,12 @@ templategate check \
 
 Exit codes: `0` = PASS, `1` = FAIL, `2` = execution error.
 
+A candidate that still opens as a package but has lost parts it referenced is
+**damaged, not unreadable** — that is a FAIL with the missing parts named, not
+a tool error. Exit 2 is reserved for a file that will not open at all, and for
+configuration mistakes. Neither `review_only` mode nor `structural: ignore`
+can bless a document that cannot be opened.
+
 A policy looks like this:
 
 ```yaml
@@ -88,27 +100,66 @@ structural:
   charts: strict                  # so does losing a chart, a pivot table,
   pivot_tables: strict            # a comment, an embedded object, custom XML,
   comments: strict                # or an Excel shape / textbox
+  parts: strict                   # ...or any other part of the file
+  links: strict                   # or a hyperlink repointed elsewhere
 semantic:
   mode: "off"                     # off | review | gate
 ```
 
 Every structural category is `strict` unless you say otherwise — deleting the
-line does not turn it off. Set one to `ignore` to opt out. `templategate init`
-writes them all out for you.
+line does not turn it off. Set one to `ignore` to opt out.
 
-The package categories are `charts`, `pivot_tables`, `drawings` (shapes and
-textboxes), `comments`, `embedded`, and `custom_xml`. Each doubles as an
-attribute name in `allow` / `protect`, and individual parts are addressable:
+### What a policy can name
+
+`templategate init` writes a starter policy listing every attribute and
+structural key with a comment, so treat that as the reference — it cannot go
+stale. The ones worth knowing about:
+
+- **Package parts, both formats** — `charts`, `pivot_tables`, `drawings`,
+  `comments`, `embedded`, `custom_xml`, plus `parts` and `links`. `parts` is
+  the catch-all for everything else in the file, including parts TemplateGate
+  has never heard of, so losing one is damage by default. `links` compares the
+  external targets of relationships, which is what catches a hyperlink
+  repointed to a new URL while its display text is untouched.
+- **Excel** — `layout` (hidden rows and columns, and their sizes),
+  `protection` (sheet and workbook locking), `sheet_settings` (including a
+  workbook switched to manual calculation).
+- **Word** — `paragraph_format`, `field`, `bookmark`, `content_control`,
+  `revision` (tracked changes), and `moved` for a block whose content survived
+  but whose position did not.
+
+The VBA project keeps its own `vba` selector and attribute rather than living
+under `package#`.
+
+Locations are addressable:
 
 ```yaml
 protect:
   - selector: "package#*"                              # every package part
   - selector: "package#charts:*"                       # one whole category
   - selector: "package#charts:xl/charts/chart1.xml"    # one specific part
+  - selector: "package#links:https://example.com/x"    # one external target
+  - selector: "Sheet1!1:10"                            # rows, for layout
+  - selector: "'Q1!Q4'!A1"                             # see below
 ```
 
-The VBA project keeps its own `vba` selector and attribute rather than living
-under `package#`.
+Word content controls and text boxes are `sdt1`, `textbox1`; a table nested
+inside a table cell extends its parent's location, so the first cell of a
+table nested in cell `r1c1` is `table1!r1c1!table1!r1c1`.
+
+Sheet names are quoted Excel-style when they contain `'`, `!` or `#`:
+`'Q1!Q4'!A1` is cell A1 of the sheet named `Q1!Q4`, where bare `Q1!Q4` would
+mean cell Q4 of a sheet named `Q1`. You only need the quotes for names
+containing those characters.
+
+### Reading a report
+
+Reports name what actually changed: a format violation reads
+`font.bold True -> False`, not "the format changed". When one edit shifts
+everything after it, the text and Markdown reports collapse the knock-on
+changes into a single line — `p4..p11: content shifted because 1 paragraph
+removed at p3` — while the JSON report always keeps every individual change,
+tied together by a `group` field.
 
 Other commands:
 
@@ -116,6 +167,30 @@ Other commands:
 templategate diff --baseline a.xlsx --candidate b.xlsx   # list every change, no policy
 templategate snapshot file.docx                           # dump the structural snapshot
 ```
+
+## When the gate fails
+
+TemplateGate never writes to your documents. There is no repair mode and there
+will not be one — a tool that can edit the file it is judging is a tool you
+have to trust twice. Recovery is deliberately outside the tool, and you
+already hold everything it needs:
+
+**The baseline is the backup.** It is the untouched original, and a failed
+candidate is a scratch file. The loop:
+
+1. Read the violations. They name what broke and where.
+2. Throw the candidate away. Do not patch it, and above all do not re-save it
+   — whatever dropped a part on the first save will drop more on the second.
+3. Copy the baseline again and retry, handing the violation report back to the
+   agent as feedback. The JSON report is built to be fed straight in.
+4. If the same violation survives two attempts, the tool doing the editing
+   cannot preserve that part. Change the approach, not the policy.
+
+In CI the baseline lives in git history, so every commit is another generation
+of backup and you can always compare against the last version that passed.
+
+Never widen the policy to make a failing check pass. That turns a caught error
+into a silent one, which is the exact failure this tool exists to prevent.
 
 ## Python API
 
@@ -160,10 +235,11 @@ summary either way. It exposes two outputs, `passed` (`true` / `false`) and
 
 ## What TemplateGate is not
 
-- Not an editor, converter, or auto-repair tool.
-- Word textboxes are not reported separately — they live inside the main
-  document part, so their text is compared along with the body rather than as
-  a distinct change.
+- Not an editor, converter, or auto-repair tool. See
+  [When the gate fails](#when-the-gate-fails).
+- Changes inside a part that is not separately modelled are reported as that
+  part changing, without naming the property — you learn `word/header1.xml`
+  was modified, not which run turned white.
 - No round-trip normalization (differences introduced by re-saving in another
   Office application are out of scope).
 - No visual/PDF regression.

@@ -9,8 +9,14 @@ allow:
     attributes: [text]
 
 protect:
+  # "body" and "p<N>" cover body paragraphs only. Content controls and text
+  # boxes are addressed as sdt<N> / textbox<N>, so "*" is what protects them.
   - selector: "*"
-    attributes: [style, format, section, header_footer, table]
+    attributes: [style, format, paragraph_format, section, header_footer,
+                 table, field, bookmark, content_control,
+                 # Rewriting the text is allowed; smuggling it in as a tracked
+                 # change, or reordering the document, is not.
+                 revision, moved]
 
 structural:
   images: strict
@@ -21,6 +27,8 @@ structural:
   comments: strict
   embedded: strict          # embedded/OLE objects
   custom_xml: strict
+  parts: strict             # styles, numbering, footnotes, settings, theme...
+  links: strict             # external hyperlink targets
 
 semantic:
   mode: "off"             # off | review | gate

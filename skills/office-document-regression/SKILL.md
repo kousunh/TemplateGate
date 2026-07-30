@@ -48,14 +48,44 @@ this workflow exactly.
      A violation whose location starts with `package#` means part of the
      document itself went missing or changed — attribute `charts`,
      `pivot_tables`, `drawings` (shapes and textboxes), `comments`,
-     `embedded`, or `custom_xml`. Read these as: **the library you edited
-     with could not represent that part, so it was dropped on save.** You
-     usually cannot repair this by editing the candidate further, because
-     the content is simply gone. Start over from a fresh copy of the
-     baseline and make the change in a way that preserves the whole file —
-     and do not re-save the candidate again, which only compounds the loss.
-   - exit code `2`: an execution error (bad path, invalid policy). Fix the
-     invocation, not the document.
+     `embedded`, `custom_xml`, `parts` (anything else in the file, including
+     parts the tool does not model), or `links` (an external hyperlink
+     target). Read these as: **the library you edited with could not
+     represent that part, so it was dropped on save.** You usually cannot
+     repair this by editing the candidate further, because the content is
+     simply gone. Start over from a fresh copy of the baseline — and do not
+     re-save the candidate, which only compounds the loss.
+
+     A FAIL can also mean the candidate is *damaged*: it still opens as a
+     package but has lost parts it referenced. That is a failed check, not a
+     tool error, and it is not repairable by further editing.
+   - exit code `2`: an execution error (bad path, invalid policy, or a file
+     that will not open at all). Fix the invocation, not the document.
+
+## The retry loop
+
+TemplateGate never writes to the document, so it cannot repair anything. The
+baseline is the backup, and a failed candidate is a scratch file:
+
+1. Read `violations[]`.
+2. Delete the candidate. Do not patch it and do not re-save it.
+3. Copy the baseline again, redo the edit, and re-run the check — using the
+   previous report as your own feedback about what to avoid this time.
+4. If the same violation appears twice, the method you are using cannot
+   preserve that part of the file. Change the method, tell the user, and stop.
+   Do not change the policy.
+
+## What the check can see
+
+Assume everything is visible. Beyond cell values and paragraph text, the check
+covers hidden rows and columns, sheet protection, manual-calculation mode,
+hyperlink targets even when the display text is unchanged, paragraph
+formatting, fields, bookmarks, content controls, text boxes (`sdt<N>` /
+`textbox<N>`), nested tables, and every package part in the file.
+
+Editing through tracked changes hides nothing: a tracked insertion is text on
+the page, so it is reported as a `text` change and a `revision` change. There
+is no way to make an edit that the report will not mention.
 
 ## Hard rules
 

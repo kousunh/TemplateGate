@@ -12,7 +12,11 @@ allow:
 protect:
   - selector: "*"
     attributes: [formula, format, merge, conditional_formatting,
-                 data_validation, header_footer, print_settings, vba]
+                 data_validation, header_footer, print_settings, vba,
+                 # A quantity edit must not hide a row, unlock the sheet, or
+                 # switch the workbook to manual calculation — which would
+                 # leave every total showing a stale answer.
+                 layout, protection, sheet_settings]
 
 structural:
   sheets: strict
@@ -27,6 +31,8 @@ structural:
   comments: strict
   embedded: strict          # embedded/OLE objects
   custom_xml: strict
+  parts: strict             # every other part of the file, known or not
+  links: strict             # a hyperlink repointed while its text stays put
 
 semantic:
   mode: "off"
