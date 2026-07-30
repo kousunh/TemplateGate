@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "officecheck"
+version = "0.1.0"
+description = "Policy-as-code acceptance gate for AI-edited Office documents (.xlsx / .xlsm / .docx). Verifies that only intended changes were made."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "OfficeCheck contributors" }]
+keywords = ["excel", "word", "office", "regression-testing", "ai-safety", "policy-as-code", "diff"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Office/Business",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+  "openpyxl>=3.1",
+  "python-docx>=1.1",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+officecheck = "officecheck.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kousunh/officecheck"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/officecheck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

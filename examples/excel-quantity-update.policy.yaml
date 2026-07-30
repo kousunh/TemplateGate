@@ -1,0 +1,23 @@
+# Example: an agent is allowed to update quantity cells on the plan sheet,
+# and nothing else. Formulas, formats, print layout and sheet structure are
+# all locked. (All names here are fictional.)
+version: 1
+target: excel
+mode: normal_input
+
+allow:
+  - selector: "計画表!B4:B6"
+    attributes: [value]
+
+protect:
+  - selector: "*"
+    attributes: [formula, format, merge, conditional_formatting,
+                 data_validation, header_footer, print_settings, vba]
+
+structural:
+  sheets: strict
+  images: strict
+  defined_names: strict
+
+semantic:
+  mode: "off"

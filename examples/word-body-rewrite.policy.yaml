@@ -1,0 +1,27 @@
+# Example: an agent may rewrite body paragraphs of a fictional business plan,
+# but tables, styles, sections and images must stay untouched.
+# Semantic review is enabled as warnings via a user-chosen command.
+version: 1
+target: word
+mode: normal_input
+
+allow:
+  - selector: "body"
+    attributes: [text]
+
+protect:
+  - selector: "*"
+    attributes: [style, section, header_footer, table]
+
+structural:
+  images: strict
+  tables: strict
+
+semantic:
+  mode: review            # findings are warnings; they never flip PASS/FAIL
+  provider: command
+  command: ""             # e.g. "claude -p" or any CLI that reads stdin & prints JSON
+  model: ""               # your choice — OfficeCheck does not pin a vendor
+  checks:
+    - "日付や期間に矛盾がないこと"
+    - "旧名称が本文に残っていないこと"
