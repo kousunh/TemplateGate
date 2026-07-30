@@ -3,9 +3,31 @@ from __future__ import annotations
 from ..core.model import CheckResult
 
 
+def human(value, limit: int = 80) -> str:
+    """A value as a person reads it, not as Python writes it.
+
+    The report is read by whoever approves the change, and `None`, quoted
+    strings and dict braces are noise to them — worse, they make a real value
+    like the string "None" impossible to tell from an absent one.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, str):
+        text = value if value else "(empty)"
+    elif isinstance(value, bool):
+        text = "yes" if value else "no"
+    elif isinstance(value, dict):
+        text = ", ".join(f"{name} {human(item, limit)}"
+                         for name, item in value.items())
+    elif isinstance(value, (list, tuple, set)):
+        text = ", ".join(human(item, limit) for item in value)
+    else:
+        text = str(value)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
 def _fmt(value) -> str:
-    text = repr(value)
-    return text if len(text) <= 80 else text[:80] + "..."
+    return human(value)
 
 
 def _grouped(violations):
@@ -35,6 +57,11 @@ def render_text(result: CheckResult) -> str:
     for role, reason in (result.meta.get("degraded") or {}).items():
         lines.append(f"  ! the {role} document is damaged: {reason}")
         lines.append("    only its package parts could be compared")
+    if result.warnings:
+        lines.append("")
+        lines.append("Policy warnings:")
+        for warning in result.warnings:
+            lines.append(f"  ! {warning}")
     if result.violations:
         lines.append("")
         if result.meta.get("policy_mode") == "review_only":
@@ -53,8 +80,11 @@ def render_text(result: CheckResult) -> str:
                 continue
             v = members[0]
             lines.append(f"  [{v.severity}] {v.change.location} ({v.change.attribute}): {v.message}")
-            if v.change.old is not None or v.change.new is not None:
-                lines.append(f"      old={_fmt(v.change.old)} new={_fmt(v.change.new)}")
+            # A named delta already reads "numfmt #,##0 -> #,##0," in the
+            # detail; repeating it as old=/new= says the same thing twice.
+            spelled_out = isinstance(v.change.old, dict) or isinstance(v.change.new, dict)
+            if not spelled_out and (v.change.old is not None or v.change.new is not None):
+                lines.append(f"      {_fmt(v.change.old)} -> {_fmt(v.change.new)}")
             if v.change.detail:
                 lines.append(f"      {v.change.detail}")
     if result.semantic_mode != "off":

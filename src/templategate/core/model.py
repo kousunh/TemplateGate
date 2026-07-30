@@ -59,6 +59,37 @@ ATTR_MOVED = "moved"
 # keeps an unmodelled feature from being an invisible one.
 ATTR_MARKUP = "markup"
 
+# Every attribute a policy may name in an allow or protect rule.  Kept here
+# so the parser can check a rule against the same list the evaluator uses —
+# a policy that names something no attribute is called protects nothing.
+ALL_ATTRIBUTES = frozenset({
+    ATTR_VALUE, ATTR_FORMULA, ATTR_FORMAT, ATTR_MERGE,
+    ATTR_CONDITIONAL_FORMATTING, ATTR_DATA_VALIDATION, ATTR_DEFINED_NAMES,
+    ATTR_SHEET_STRUCTURE, ATTR_IMAGES, ATTR_HEADER_FOOTER, ATTR_PRINT_SETTINGS,
+    ATTR_VBA, ATTR_TEXT, ATTR_STYLE, ATTR_SECTION, ATTR_TABLE,
+    ATTR_CHARTS, ATTR_PIVOT_TABLES, ATTR_DRAWINGS, ATTR_COMMENTS,
+    ATTR_EMBEDDED, ATTR_CUSTOM_XML, ATTR_PARTS, ATTR_LINKS,
+    ATTR_PROTECTION, ATTR_SHEET_SETTINGS, ATTR_LAYOUT,
+    ATTR_PARAGRAPH_FORMAT, ATTR_FIELD, ATTR_BOOKMARK, ATTR_REVISION,
+    ATTR_CONTENT_CONTROL, ATTR_MOVED, ATTR_MARKUP,
+})
+
+# structural policy key -> the change attribute it governs.
+STRUCTURAL_ATTRIBUTES = {
+    "sheets": ATTR_SHEET_STRUCTURE,
+    "images": ATTR_IMAGES,
+    "defined_names": ATTR_DEFINED_NAMES,
+    "tables": ATTR_TABLE,
+    "charts": ATTR_CHARTS,
+    "pivot_tables": ATTR_PIVOT_TABLES,
+    "drawings": ATTR_DRAWINGS,
+    "comments": ATTR_COMMENTS,
+    "embedded": ATTR_EMBEDDED,
+    "custom_xml": ATTR_CUSTOM_XML,
+    "parts": ATTR_PARTS,
+    "links": ATTR_LINKS,
+}
+
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 
@@ -119,6 +150,8 @@ class CheckResult:
     violations: list[Violation] = field(default_factory=list)
     semantic_mode: str = "off"
     semantic_findings: list[SemanticFinding] = field(default_factory=list)
+    # Things wrong with the policy itself rather than with the document.
+    warnings: list[str] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -135,6 +168,7 @@ class CheckResult:
                 "errors": sum(1 for v in self.violations if v.severity == SEVERITY_ERROR),
                 "warnings": sum(1 for v in self.violations if v.severity == SEVERITY_WARNING),
             },
+            "warnings": list(self.warnings),
             "violations": [v.to_dict() for v in self.violations],
             "allowed_changes": [c.to_dict() for c in self.allowed],
             "semantic": {

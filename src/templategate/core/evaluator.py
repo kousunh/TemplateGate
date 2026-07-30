@@ -13,41 +13,18 @@ reported as warnings so the run still passes.
 from __future__ import annotations
 
 from .model import (
-    ATTR_CHARTS,
-    ATTR_COMMENTS,
-    ATTR_CUSTOM_XML,
-    ATTR_DEFINED_NAMES,
-    ATTR_DRAWINGS,
-    ATTR_EMBEDDED,
-    ATTR_IMAGES,
-    ATTR_LINKS,
-    ATTR_PARTS,
-    ATTR_PIVOT_TABLES,
-    ATTR_SHEET_STRUCTURE,
-    ATTR_TABLE,
     Change,
     SEVERITY_ERROR,
     SEVERITY_WARNING,
+    STRUCTURAL_ATTRIBUTES,
     Violation,
 )
 from .policy import MODE_REVIEW_ONLY, Policy
 from .selector import match_attributes, match_selector
 
-# structural policy key -> change attribute it governs
-_STRUCTURAL_ATTRS = {
-    "sheets": ATTR_SHEET_STRUCTURE,
-    "images": ATTR_IMAGES,
-    "defined_names": ATTR_DEFINED_NAMES,
-    "tables": ATTR_TABLE,
-    "charts": ATTR_CHARTS,
-    "pivot_tables": ATTR_PIVOT_TABLES,
-    "drawings": ATTR_DRAWINGS,
-    "comments": ATTR_COMMENTS,
-    "embedded": ATTR_EMBEDDED,
-    "custom_xml": ATTR_CUSTOM_XML,
-    "parts": ATTR_PARTS,
-    "links": ATTR_LINKS,
-}
+# The policy parser checks rules against this same map, so a structural key
+# that evaluates to nothing here is rejected there rather than ignored.
+_STRUCTURAL_ATTRS = STRUCTURAL_ATTRIBUTES
 
 
 def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[Violation]]:
@@ -76,7 +53,7 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
                     change=change,
                     rule="protected",
                     severity=severity,
-                    message=f"protected attribute '{change.attribute}' changed at {change.location}",
+                    message=f"protected attribute '{change.attribute}' changed",
                 )
             )
             continue
@@ -95,8 +72,8 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
                 rule="not_allowed",
                 severity=severity,
                 message=(
-                    f"change to '{change.attribute}' at {change.location} "
-                    "is not allowed by the policy (default deny)"
+                    f"change to '{change.attribute}' is not allowed "
+                    "by the policy (default deny)"
                 ),
             )
         )

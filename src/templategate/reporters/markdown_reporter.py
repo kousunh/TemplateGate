@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..core.model import CheckResult
-from .text_reporter import _grouped
+from .text_reporter import _grouped, human
 
 
 def _escape(text: str) -> str:
@@ -10,8 +10,7 @@ def _escape(text: str) -> str:
 
 
 def _cell(value) -> str:
-    text = _escape(repr(value))
-    return text if len(text) <= 60 else text[:60] + "..."
+    return _escape(human(value, limit=60))
 
 
 def render_markdown(result: CheckResult) -> str:
@@ -27,6 +26,9 @@ def render_markdown(result: CheckResult) -> str:
     for role, reason in (result.meta.get("degraded") or {}).items():
         lines += ["", f"> **The {role} document is damaged:** {_escape(reason)}  ",
                   "> Only its package parts could be compared."]
+    if result.warnings:
+        lines += ["", "### Policy warnings", ""]
+        lines += [f"- {_escape(warning)}" for warning in result.warnings]
     if result.violations:
         lines += [""]
         if result.meta.get("policy_mode") == "review_only":

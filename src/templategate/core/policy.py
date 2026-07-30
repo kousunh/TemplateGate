@@ -7,12 +7,21 @@ agent that produced the candidate document.  TemplateGate only reads it.
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from .model import ALL_ATTRIBUTES, STRUCTURAL_ATTRIBUTES
+
 VALID_TARGETS = ("excel", "word", "auto")
+
+VALID_KEYS = ("version", "target", "mode", "allow", "protect",
+              "structural", "semantic")
+VALID_RULE_KEYS = ("selector", "attributes")
+VALID_SEMANTIC_KEYS = ("mode", "provider", "command", "model", "checks")
+VALID_STRUCTURAL_VALUES = ("strict", "ignore")
 
 # review_only    — violations are reported as warnings and never fail the run.
 # normal_input   — the default: every violation is an error.
@@ -30,6 +39,27 @@ class PolicyError(ValueError):
     pass
 
 
+def _did_you_mean(word: str, known) -> str:
+    """" — did you mean 'allow'?", when there is an obvious candidate.
+
+    A misspelled key is not a small problem here: an unknown key is ignored,
+    and a policy whose protect rule is spelled `protekt` protects nothing
+    while looking like it protects everything.  Naming the likely intent is
+    the difference between a two-second fix and a false sense of safety.
+    """
+    close = difflib.get_close_matches(word, sorted(known), n=1, cutoff=0.7)
+    if close:
+        return f" — did you mean {close[0]!r}?"
+    return f" (valid: {', '.join(sorted(known))})"
+
+
+def _check_known(word: str, known, *, what: str, context: str = "") -> None:
+    if word in known:
+        return
+    where = f"{context}: " if context else ""
+    raise PolicyError(f"{where}unknown {what} {word!r}{_did_you_mean(word, known)}")
+
+
 @dataclass
 class Rule:
     selector: str = "*"
@@ -41,11 +71,17 @@ class Rule:
             return cls(selector=obj)
         if not isinstance(obj, dict):
             raise PolicyError(f"{context}: each rule must be a string or a mapping")
+        for key in obj:
+            _check_known(str(key), VALID_RULE_KEYS, what="key", context=context)
         attrs = obj.get("attributes", ["*"])
         if isinstance(attrs, str):
             attrs = [attrs]
         if not isinstance(attrs, list) or not all(isinstance(a, str) for a in attrs):
             raise PolicyError(f"{context}: 'attributes' must be a list of strings")
+        for attribute in attrs:
+            if attribute == "*":
+                continue
+            _check_known(attribute, ALL_ATTRIBUTES, what="attribute", context=context)
         return cls(selector=str(obj.get("selector", "*")), attributes=attrs)
 
 
@@ -89,12 +125,17 @@ def load_policy(path: str | Path) -> Policy:
 
 
 def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
+    for key in raw:
+        _check_known(str(key), VALID_KEYS, what="policy key")
+
     target = str(raw.get("target", "auto")).lower()
     if target not in VALID_TARGETS:
-        raise PolicyError(f"target must be one of {VALID_TARGETS}, got {target!r}")
+        raise PolicyError(f"target: {target!r} is not a target"
+                          f"{_did_you_mean(target, VALID_TARGETS)}")
     mode = str(raw.get("mode", "normal_input"))
     if mode not in VALID_MODES:
-        raise PolicyError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+        raise PolicyError(f"mode: {mode!r} is not a mode"
+                          f"{_did_you_mean(mode, VALID_MODES)}")
 
     allow = [Rule.from_obj(o, context="allow") for o in _as_list(raw.get("allow"), "allow")]
     protect = [Rule.from_obj(o, context="protect") for o in _as_list(raw.get("protect"), "protect")]
@@ -102,13 +143,23 @@ def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
     structural = raw.get("structural", {}) or {}
     if not isinstance(structural, dict):
         raise PolicyError("'structural' must be a mapping")
+    for key, value in structural.items():
+        _check_known(str(key), STRUCTURAL_ATTRIBUTES, what="structural key")
+        if str(value).lower() not in VALID_STRUCTURAL_VALUES:
+            raise PolicyError(
+                f"structural.{key}: {value!r} is not a setting"
+                f"{_did_you_mean(str(value).lower(), VALID_STRUCTURAL_VALUES)}")
 
     sem_raw = raw.get("semantic", {}) or {}
     if not isinstance(sem_raw, dict):
         raise PolicyError("'semantic' must be a mapping")
+    for key in sem_raw:
+        _check_known(str(key), VALID_SEMANTIC_KEYS, what="key", context="semantic")
     sem_mode = str(sem_raw.get("mode", "off")).lower()
     if sem_mode not in VALID_SEMANTIC_MODES:
-        raise PolicyError(f"semantic.mode must be one of {VALID_SEMANTIC_MODES}, got {sem_mode!r}")
+        raise PolicyError(
+            f"semantic.mode: {sem_mode!r} is not a mode"
+            f"{_did_you_mean(sem_mode, VALID_SEMANTIC_MODES)}")
     checks = _as_list(sem_raw.get("checks"), "semantic.checks")
     norm_checks: list[str] = []
     for c in checks:
@@ -217,6 +268,9 @@ structural:
   custom_xml: strict
   parts: strict            # styles, numbering, footnotes, settings, theme...
   links: strict            # external hyperlink targets
+  # No pivot_tables or drawings here: those are Excel part families.  Word
+  # keeps its shapes and text boxes inside document.xml, where they are
+  # covered by the text, markup and images attributes instead.
 
 semantic:
   mode: "off"

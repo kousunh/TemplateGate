@@ -26,6 +26,15 @@ from ..core.selector import quote_sheet
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
 
+def _readable(value) -> str:
+    """A cell value or formula as a person would write it, not as Python."""
+    if value is None:
+        return "empty"
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(part) for part in value)
+    return str(value)
+
+
 def _similarity(b: dict, c: dict) -> float:
     """Fraction of cell coordinates that are byte-identical between two sheets."""
     b_cells, c_cells = b["cells"], c["cells"]
@@ -177,7 +186,14 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         if old["value"] != new["value"]:
             changes.append(Change(loc, ATTR_VALUE, old=old["value"], new=new["value"]))
         if old["formula"] != new["formula"]:
-            changes.append(Change(loc, ATTR_FORMULA, old=old["formula"], new=new["formula"]))
+            detail = ""
+            if old["formula"] and not new["formula"]:
+                # The archetypal damage: =SUM(B2:B4) becomes 1750.  It still
+                # shows the right number today and stops being a total.
+                detail = ("formula replaced by a hardcoded value "
+                          f"({_readable(old['formula'])} -> {_readable(new['value'])})")
+            changes.append(Change(loc, ATTR_FORMULA, old=old["formula"],
+                                  new=new["formula"], detail=detail))
         if old["format"] != new["format"]:
             delta = field_delta(old["format"], new["format"])
             old_fields, new_fields = delta_values(delta)

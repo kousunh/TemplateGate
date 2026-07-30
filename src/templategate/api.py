@@ -131,6 +131,10 @@ def check(
                               align=policy.mode == MODE_PAGE_EXTENSION)
     allowed, violations = evaluate(changes, policy)
 
+    from .core.liveness import policy_warnings
+
+    warnings = policy_warnings(policy, base_snap)
+
     degraded = {
         role: snap["degraded"]
         for role, snap in (("baseline", base_snap), ("candidate", cand_snap))
@@ -171,6 +175,7 @@ def check(
         violations=violations,
         semantic_mode=mode,
         semantic_findings=findings,
+        warnings=warnings,
         meta={"policy": policy.source_path, "policy_mode": policy.mode,
               "degraded": degraded},
     )

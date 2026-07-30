@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .api import check, detect_target, diff, snapshot
+from .api import check, diff, snapshot
 from .core.policy import PolicyError, SAMPLE_POLICY_EXCEL, SAMPLE_POLICY_WORD
 from .reporters import RENDERERS
 
@@ -29,35 +29,80 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="templategate",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Policy-as-code acceptance gate for AI-edited Office documents. "
             "Verifies that only intended changes were made to .xlsx/.xlsm/.docx files."
         ),
+        epilog=(
+            "Exit codes:\n"
+            "  0  the candidate obeys the policy\n"
+            "  1  it does not, or the document is damaged\n"
+            "  2  the tool could not run the check (bad policy, unreadable file)\n"
+            "\n"
+            "Start with:  templategate init --target excel"
+        ),
     )
     parser.add_argument("--version", action="version", version=f"templategate {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    p_check = sub.add_parser("check", help="check a candidate against a baseline using a policy")
-    p_check.add_argument("--baseline", required=True)
-    p_check.add_argument("--candidate", required=True)
-    p_check.add_argument("--policy", required=True)
-    p_check.add_argument("--report", choices=sorted(RENDERERS), default="text")
-    p_check.add_argument("--output", help="write the report to a file instead of stdout")
+    baseline_help = "the original, untouched document (the edit's starting point)"
+    candidate_help = "the edited document to judge"
+
+    p_check = sub.add_parser(
+        "check", help="check a candidate against a baseline using a policy",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Judge an edited document against the policy you trust.",
+        epilog=("Examples:\n"
+                "  templategate check --baseline plan.xlsx --candidate plan.edited.xlsx \\\n"
+                "      --policy templategate.policy.yaml\n"
+                "  templategate check --baseline a.docx --candidate b.docx \\\n"
+                "      --policy p.yaml --report markdown --output report.md"))
+    p_check.add_argument("--baseline", required=True, metavar="FILE", help=baseline_help)
+    p_check.add_argument("--candidate", required=True, metavar="FILE", help=candidate_help)
+    p_check.add_argument("--policy", required=True, metavar="FILE",
+                         help="the trusted policy that says what may change")
+    p_check.add_argument("--report", choices=sorted(RENDERERS), default="text",
+                         help="report format (default: text)")
+    p_check.add_argument("--output", metavar="FILE",
+                         help="write the report to a file instead of stdout")
     p_check.add_argument("--semantic", choices=["off", "review", "gate"],
-                         help="override the policy's semantic mode")
+                         help="override the policy's semantic mode for this run")
 
-    p_diff = sub.add_parser("diff", help="list all changes without a policy")
-    p_diff.add_argument("--baseline", required=True)
-    p_diff.add_argument("--candidate", required=True)
-    p_diff.add_argument("--json", action="store_true", help="output JSON")
+    p_diff = sub.add_parser(
+        "diff", help="list every change, with no policy applied",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Show what changed between two documents, judging nothing. "
+                    "Useful for writing a policy in the first place.",
+        epilog=("Examples:\n"
+                "  templategate diff --baseline plan.xlsx --candidate plan.edited.xlsx\n"
+                "  templategate diff --baseline a.docx --candidate b.docx --json"))
+    p_diff.add_argument("--baseline", required=True, metavar="FILE", help=baseline_help)
+    p_diff.add_argument("--candidate", required=True, metavar="FILE", help=candidate_help)
+    p_diff.add_argument("--json", action="store_true",
+                        help="output JSON instead of one line per change")
 
-    p_snap = sub.add_parser("snapshot", help="dump a document's structural snapshot as JSON")
-    p_snap.add_argument("file")
-    p_snap.add_argument("--output")
+    p_snap = sub.add_parser(
+        "snapshot", help="dump a document's structural snapshot as JSON",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Print everything TemplateGate can see in one document.",
+        epilog="Examples:\n  templategate snapshot plan.xlsx --output plan.snapshot.json")
+    p_snap.add_argument("file", metavar="FILE",
+                        help="the .xlsx/.xlsm/.docx file to inspect")
+    p_snap.add_argument("--output", metavar="FILE",
+                        help="write the JSON to a file instead of stdout")
 
-    p_init = sub.add_parser("init", help="write a sample policy file")
-    p_init.add_argument("--target", choices=["excel", "word"], default="excel")
-    p_init.add_argument("--output", default="templategate.policy.yaml")
+    p_init = sub.add_parser(
+        "init", help="write a starter policy file",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Write a commented starter policy to edit and then pin in CI.",
+        epilog=("Examples:\n"
+                "  templategate init --target excel\n"
+                "  templategate init --target word --output .templategate/contract.yaml"))
+    p_init.add_argument("--target", choices=["excel", "word"], default="excel",
+                        help="which format the starter policy is for (default: excel)")
+    p_init.add_argument("--output", default="templategate.policy.yaml", metavar="FILE",
+                        help="where to write it (default: templategate.policy.yaml)")
 
     args = parser.parse_args(argv)
     try:
@@ -74,6 +119,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "check":
         result = check(args.baseline, args.candidate, args.policy,
                        semantic_mode=args.semantic)
+        for warning in result.warnings:
+            print(f"templategate: warning: {warning}", file=sys.stderr)
         report = RENDERERS[args.report](result)
         if args.output:
             Path(args.output).write_text(report, encoding="utf-8")
