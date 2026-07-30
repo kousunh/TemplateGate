@@ -32,6 +32,13 @@ allowed. An agent may *propose* a policy, but the actual check runs against a
 **trusted policy** that a human (or CI) has reviewed and pinned. TemplateGate
 only reads the policy file — it has no way to widen it.
 
+This is not a hypothetical risk. Microsoft Research measured frontier LLMs
+corrupting an average of 25% of document content over long editing workflows —
+"sparse but severe errors that silently corrupt documents" — and found that
+agentic tool use alone does not fix it
+([Laban, Schnabel & Neville, 2026](https://arxiv.org/abs/2604.15597)).
+Verification has to live outside the agent.
+
 ## Install
 
 ```bash
@@ -127,8 +134,8 @@ summary either way. It exposes two outputs, `passed` (`true` / `false`) and
 ## What TemplateGate is not
 
 - Not an editor, converter, or auto-repair tool.
-- Charts, shapes, and VBA presence are not captured yet (planned; images,
-  print settings, and defined names are).
+- Charts and shapes are not captured yet (planned; images, print settings,
+  defined names, and the VBA project are).
 - No round-trip normalization (differences introduced by re-saving in another
   Office application are out of scope).
 - No visual/PDF regression.
