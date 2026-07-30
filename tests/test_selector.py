@@ -1,4 +1,4 @@
-from officecheck.core.selector import match_attributes, match_selector
+from docgate.core.selector import match_attributes, match_selector
 
 
 def test_wildcard_matches_everything():

@@ -1,6 +1,6 @@
 """Excel (.xlsx / .xlsm) snapshot extraction.
 
-A snapshot is a plain dict of everything OfficeCheck compares:
+A snapshot is a plain dict of everything DocGate compares:
 values, formulas, formats, merges, conditional formatting, data validation,
 sheet structure, images, headers/footers, print settings, defined names and
 the VBA project hash.  Extraction is read-only.

@@ -1,4 +1,4 @@
-"""OfficeCheck — policy-as-code acceptance gate for AI-edited Office documents."""
+"""DocGate — policy-as-code acceptance gate for AI-edited Office documents."""
 
 __version__ = "0.1.0"
 

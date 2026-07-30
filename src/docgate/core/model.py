@@ -1,4 +1,4 @@
-"""Data model shared across OfficeCheck.
+"""Data model shared across DocGate.
 
 A *snapshot* is a normalized dict extracted from a document.  Comparing two
 snapshots yields ``Change`` records; evaluating changes against a policy
@@ -87,7 +87,7 @@ class CheckResult:
 
     def to_dict(self) -> dict:
         return {
-            "tool": "officecheck",
+            "tool": "docgate",
             "passed": self.passed,
             "target": self.target,
             "baseline": self.baseline,

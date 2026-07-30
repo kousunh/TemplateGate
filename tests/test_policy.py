@@ -1,8 +1,8 @@
 import pytest
 
-from officecheck.core.evaluator import evaluate
-from officecheck.core.model import Change
-from officecheck.core.policy import PolicyError, parse_policy
+from docgate.core.evaluator import evaluate
+from docgate.core.model import Change
+from docgate.core.policy import PolicyError, parse_policy
 
 
 def test_parse_minimal_policy():

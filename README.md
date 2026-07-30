@@ -1,12 +1,12 @@
-# OfficeCheck
+# DocGate
 
-**Policy-as-code acceptance gate for AI-edited Office documents.**
+**Policy-as-code acceptance gate for AI-edited Excel & Word documents.**
 
 日本語版は [README.ja.md](README.ja.md) をどうぞ。
 
 AI agents (Claude Code, Codex, ChatGPT, ...) are great at editing Excel and Word
 files — and occasionally destroy a formula, a merged cell, or a print layout
-while doing it. OfficeCheck is a **read-only regression test** for
+while doing it. DocGate is a **read-only regression test** for
 `.xlsx` / `.xlsm` / `.docx` files: it compares a *baseline* (before the edit)
 with a *candidate* (after the edit) and verifies that **only the changes your
 policy allows were made**.
@@ -18,8 +18,8 @@ policy allows were made**.
   Word paragraphs / tables / sections.
 - **Optional semantic checks** — `off` (default; nothing ever leaves your
   machine), `review` (AI findings as warnings), or `gate` (AI findings affect
-  PASS/FAIL). Bring your own model — OfficeCheck does not pin a vendor.
-- **Not an editor** — OfficeCheck never modifies documents and never
+  PASS/FAIL). Bring your own model — DocGate does not pin a vendor.
+- **Not an editor** — DocGate never modifies documents and never
   auto-repairs. A failed candidate should be discarded; a human makes the
   final call.
 
@@ -27,13 +27,13 @@ policy allows were made**.
 
 The agent that edited the document must never be the one that decides what is
 allowed. An agent may *propose* a policy, but the actual check runs against a
-**trusted policy** that a human (or CI) has reviewed and pinned. OfficeCheck
+**trusted policy** that a human (or CI) has reviewed and pinned. DocGate
 only reads the policy file — it has no way to widen it.
 
 ## Install
 
 ```bash
-pip install officecheck
+pip install docgate
 ```
 
 Requires Python 3.10+. Pure-Python dependencies only (openpyxl, python-docx, PyYAML).
@@ -42,15 +42,15 @@ Requires Python 3.10+. Pure-Python dependencies only (openpyxl, python-docx, PyY
 
 ```bash
 # 1. Generate a starter policy and edit it
-officecheck init --target excel
+docgate init --target excel
 
 # 2. Let your agent edit a COPY of the document
 
 # 3. Check the result
-officecheck check \
+docgate check \
   --baseline plan_2026.xlsx \
   --candidate plan_2026.edited.xlsx \
-  --policy officecheck.policy.yaml \
+  --policy docgate.policy.yaml \
   --report json
 ```
 
@@ -77,16 +77,16 @@ semantic:
 Other commands:
 
 ```bash
-officecheck diff --baseline a.xlsx --candidate b.xlsx   # list every change, no policy
-officecheck snapshot file.docx                           # dump the structural snapshot
+docgate diff --baseline a.xlsx --candidate b.xlsx   # list every change, no policy
+docgate snapshot file.docx                           # dump the structural snapshot
 ```
 
 ## Python API
 
 ```python
-import officecheck
+import docgate
 
-result = officecheck.check("baseline.xlsx", "candidate.xlsx", "policy.yaml")
+result = docgate.check("baseline.xlsx", "candidate.xlsx", "policy.yaml")
 if not result.passed:
     for v in result.violations:
         print(v.change.location, v.change.attribute, v.message)
@@ -96,33 +96,33 @@ if not result.passed:
 
 The `skills/office-document-regression/` directory contains an agent skill
 (Claude Code, Codex, ChatGPT and compatible) that teaches an agent the safe
-workflow: edit a copy, run `officecheck check`, interpret the JSON report,
+workflow: edit a copy, run `docgate check`, interpret the JSON report,
 and **never** edit the policy to make a failing check pass.
 
 ## GitHub Action
 
 ```yaml
-- uses: <owner>/officecheck/action@v1
+- uses: <owner>/docgate/action@v1
   with:
     baseline: docs/plan_baseline.xlsx
     candidate: docs/plan.xlsx
-    policy: .officecheck/plan.policy.yaml
+    policy: .docgate/plan.policy.yaml
 ```
 
-## What OfficeCheck is not
+## What DocGate is not
 
 - Not an editor, converter, or auto-repair tool.
 - No round-trip normalization (differences introduced by re-saving in another
   Office application are out of scope).
 - No visual/PDF regression.
-- Semantic mode `off` performs zero network calls; OfficeCheck itself never
+- Semantic mode `off` performs zero network calls; DocGate itself never
   uploads your documents anywhere.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
-OfficeCheck is an independent open-source project and is not affiliated with,
+DocGate is an independent open-source project and is not affiliated with,
 endorsed by, or sponsored by Microsoft. "Microsoft", "Office", "Excel" and
 "Word" are trademarks of Microsoft Corporation, used here only to identify
 file formats.

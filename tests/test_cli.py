@@ -1,6 +1,6 @@
 import json
 
-from officecheck.cli import main
+from docgate.cli import main
 
 
 def test_check_pass_exit_code(fixtures, capsys):

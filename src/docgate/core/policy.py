@@ -2,7 +2,7 @@
 
 A policy is the *trusted* description of what an edit is allowed to change.
 It must be authored or approved by a human (or pinned in CI) — never by the
-agent that produced the candidate document.  OfficeCheck only reads it.
+agent that produced the candidate document.  DocGate only reads it.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def _as_list(value, name: str) -> list:
 
 
 SAMPLE_POLICY_EXCEL = """\
-# OfficeCheck policy — trusted acceptance rules for an Excel edit.
+# DocGate policy — trusted acceptance rules for an Excel edit.
 # This file must be authored/approved by a human or pinned in CI,
 # never by the agent that edited the document.
 version: 1
@@ -171,7 +171,7 @@ semantic:
 """
 
 SAMPLE_POLICY_WORD = """\
-# OfficeCheck policy — trusted acceptance rules for a Word edit.
+# DocGate policy — trusted acceptance rules for a Word edit.
 version: 1
 target: word
 mode: normal_input

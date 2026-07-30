@@ -1,4 +1,4 @@
-from officecheck import check, diff, snapshot
+from docgate import check, diff, snapshot
 
 
 def test_snapshot_contents(fixtures):
