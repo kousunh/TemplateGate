@@ -24,6 +24,7 @@ from ..core.model import (
     ATTR_TEXT,
     Change,
 )
+from ..core.package import diff_packages
 
 
 def _paragraph_attrs(loc: str, old: dict, new: dict) -> list[Change]:
@@ -155,4 +156,8 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
     for sha in (c_imgs - b_imgs):
         changes.append(Change(f"#image:{sha[:8]}", ATTR_IMAGES, old=None, new="present",
                               detail="image added or replaced"))
+
+    # Comments, VBA, embedded objects and custom XML are dropped wholesale by
+    # python-docx, so they are compared straight from the zip.
+    changes.extend(diff_packages(base, cand))
     return changes

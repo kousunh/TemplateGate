@@ -15,6 +15,12 @@ protect:
 structural:
   images: strict
   tables: strict
+  # Rewriting body text must not cost the document its review comments or its
+  # embedded attachments — the kind of loss you only notice much later.
+  charts: strict
+  comments: strict
+  embedded: strict          # embedded/OLE objects
+  custom_xml: strict
 
 semantic:
   mode: "off"             # off | review | gate

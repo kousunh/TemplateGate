@@ -13,8 +13,14 @@ reported as warnings so the run still passes.
 from __future__ import annotations
 
 from .model import (
+    ATTR_CHARTS,
+    ATTR_COMMENTS,
+    ATTR_CUSTOM_XML,
     ATTR_DEFINED_NAMES,
+    ATTR_DRAWINGS,
+    ATTR_EMBEDDED,
     ATTR_IMAGES,
+    ATTR_PIVOT_TABLES,
     ATTR_SHEET_STRUCTURE,
     ATTR_TABLE,
     Change,
@@ -31,6 +37,12 @@ _STRUCTURAL_ATTRS = {
     "images": ATTR_IMAGES,
     "defined_names": ATTR_DEFINED_NAMES,
     "tables": ATTR_TABLE,
+    "charts": ATTR_CHARTS,
+    "pivot_tables": ATTR_PIVOT_TABLES,
+    "drawings": ATTR_DRAWINGS,
+    "comments": ATTR_COMMENTS,
+    "embedded": ATTR_EMBEDDED,
+    "custom_xml": ATTR_CUSTOM_XML,
 }
 
 

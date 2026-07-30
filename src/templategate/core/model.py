@@ -28,6 +28,14 @@ ATTR_STYLE = "style"
 ATTR_SECTION = "section"
 ATTR_TABLE = "table"
 
+# OOXML package parts that editing libraries silently drop on save.
+ATTR_CHARTS = "charts"
+ATTR_PIVOT_TABLES = "pivot_tables"
+ATTR_DRAWINGS = "drawings"
+ATTR_COMMENTS = "comments"
+ATTR_EMBEDDED = "embedded"
+ATTR_CUSTOM_XML = "custom_xml"
+
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 

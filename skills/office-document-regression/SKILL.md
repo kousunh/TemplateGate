@@ -44,6 +44,16 @@ this workflow exactly.
      reports both a `value` violation and a `formula` one at the same
      location. Restoring the formula clears both — fix the cause, not each
      entry.
+
+     A violation whose location starts with `package#` means part of the
+     document itself went missing or changed — attribute `charts`,
+     `pivot_tables`, `drawings` (shapes and textboxes), `comments`,
+     `embedded`, or `custom_xml`. Read these as: **the library you edited
+     with could not represent that part, so it was dropped on save.** You
+     usually cannot repair this by editing the candidate further, because
+     the content is simply gone. Start over from a fresh copy of the
+     baseline and make the change in a way that preserves the whole file —
+     and do not re-save the candidate again, which only compounds the loss.
    - exit code `2`: an execution error (bad path, invalid policy). Fix the
      invocation, not the document.
 
@@ -55,8 +65,9 @@ this workflow exactly.
 - **NEVER deliver a candidate that fails the check** without telling the user
   it failed and why.
 - Do not "fix" unexpected diffs by re-saving the baseline or swapping files.
-- If the check reports formula/format/VBA violations you did not intend,
-  assume your editing tool corrupted the file — start over from a fresh copy.
+- If the check reports formula/format/VBA violations you did not intend, or
+  any `package#` violation, assume your editing tool corrupted the file —
+  start over from a fresh copy.
 
 ## Useful commands
 

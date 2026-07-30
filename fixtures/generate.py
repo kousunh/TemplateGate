@@ -8,11 +8,14 @@ Usage:  python fixtures/generate.py
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 from docx import Document
 from docx.shared import Pt, RGBColor
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.chart import BarChart, Reference
+from openpyxl.comments import Comment
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Font, PatternFill
@@ -171,6 +174,126 @@ def make_word_bad_edit(baseline: Path, path: Path) -> None:
     doc.save(path)
 
 
+# --- OOXML package parts -----------------------------------------------
+#
+# Charts, pivot tables, shapes, embedded objects and VBA cannot be written by
+# openpyxl or python-docx (that is the whole point — they get dropped), so the
+# fixtures inject them into the zip directly.  The bytes are minimal but the
+# part names are the real ones, which is all the zip-level scanner reads.
+
+def _drawing_with_textbox(text: str) -> bytes:
+    """A drawing part holding one textbox — the kind openpyxl silently drops."""
+    return (
+        '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006'
+        '/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml'
+        '/2006/main"><xdr:twoCellAnchor><xdr:sp><xdr:txBody><a:p><a:r><a:t>'
+        f"{text}"
+        "</a:t></a:r></a:p></xdr:txBody></xdr:sp></xdr:twoCellAnchor></xdr:wsDr>"
+    ).encode("utf-8")
+
+
+def excel_package_parts(marker: str) -> dict[str, bytes]:
+    return {
+        "xl/charts/chart1.xml": f"<c:chartSpace>{marker}</c:chartSpace>".encode(),
+        "xl/pivotTables/pivotTable1.xml": f"<pivotTableDefinition>{marker}</pivotTableDefinition>".encode(),
+        "xl/pivotCache/pivotCacheDefinition1.xml": f"<pivotCacheDefinition>{marker}</pivotCacheDefinition>".encode(),
+        "xl/comments/comment1.xml": f"<comments>{marker}</comments>".encode(),
+        "xl/threadedComments/threadedComment1.xml": f"<ThreadedComments>{marker}</ThreadedComments>".encode(),
+        "xl/embeddings/oleObject1.bin": b"OLE-" + marker.encode(),
+        "customXml/item1.xml": f"<props>{marker}</props>".encode(),
+        "xl/vbaProject.bin": b"VBA-" + marker.encode(),
+        "xl/drawings/drawing1.xml": _drawing_with_textbox(f"APPROVED BY {marker}"),
+    }
+
+
+def word_package_parts(marker: str) -> dict[str, bytes]:
+    return {
+        "word/charts/chart1.xml": f"<c:chartSpace>{marker}</c:chartSpace>".encode(),
+        "word/comments.xml": f"<w:comments>{marker}</w:comments>".encode(),
+        "word/embeddings/oleObject1.bin": b"OLE-" + marker.encode(),
+        "customXml/item1.xml": f"<props>{marker}</props>".encode(),
+        "word/vbaProject.bin": b"VBA-" + marker.encode(),
+    }
+
+
+def _touch_xml(data: bytes) -> bytes:
+    """Change a part's bytes without changing its meaning."""
+    end_of_declaration = data.find(b"?>")
+    insert_at = end_of_declaration + 2 if end_of_declaration != -1 else 0
+    return data[:insert_at] + b"<!-- resaved -->" + data[insert_at:]
+
+
+def volatile_variants(src: Path) -> dict[str, bytes]:
+    """Parts a legitimate re-save churns, without changing the document.
+
+    The gate must stay silent about all of these.  Content types and the
+    relationship files are excluded by the scanner too, but they cannot be
+    scrambled here without making the workbook unreadable, so they are
+    covered by a unit test against the scanner instead.
+    """
+    with zipfile.ZipFile(src) as zf:
+        names = set(zf.namelist())
+        parts = {
+            name: _touch_xml(zf.read(name))
+            for name in ("docProps/core.xml", "docProps/app.xml")
+            if name in names
+        }
+    parts["xl/calcChain.xml"] = b"<calcChain>rebuilt on save</calcChain>"
+    parts["xl/printerSettings/printerSettings1.bin"] = b"PRINTER-SETTINGS-BLOB"
+    # An orphan media file: no drawing references it, so it is not an image
+    # change either — it must simply be ignored.
+    parts["xl/media/image9.png"] = b"\x89PNG\r\n\x1a\nnot-a-real-image"
+    return parts
+
+
+def rewrite_zip(src: Path, dest: Path, *, add: dict[str, bytes] | None = None,
+                drop: tuple[str, ...] = ()) -> None:
+    """Copy a package, replacing or dropping individual parts.
+
+    Entries in ``add`` replace same-named originals rather than sitting
+    alongside them, because a zip may legally hold duplicate names and that
+    would make the fixture ambiguous.
+    """
+    add = add or {}
+    with zipfile.ZipFile(src) as zin, \
+            zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            if item.filename in drop or item.filename in add:
+                continue
+            zout.writestr(item, zin.read(item.filename))
+        for name, data in add.items():
+            zout.writestr(name, data)
+
+
+def make_excel_native_rich(path: Path, logo: Path) -> None:
+    """A workbook whose chart, comment and image openpyxl can round-trip.
+
+    Used to prove the package layer stays quiet on a legitimate edit: every
+    part here survives a load/save, so any report would be a false positive.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws["A1"] = "item"
+    ws["B1"] = "qty"
+    for row, (name, qty) in enumerate([("管路A", 3), ("管路B", 5), ("バルブ", 9)], start=2):
+        ws[f"A{row}"] = name
+        ws[f"B{row}"] = qty
+    ws["D2"].comment = Comment("確認しました", "reviewer")
+    chart = BarChart()
+    chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=4), titles_from_data=True)
+    ws.add_chart(chart, "F2")
+    ws.add_image(XLImage(str(logo)), "H2")
+    wb.save(path)
+
+
+def make_excel_native_edit(baseline: Path, path: Path) -> None:
+    """The allowed edit: openpyxl loads, changes one cell, saves."""
+    wb = load_workbook(baseline)
+    wb["Data"]["B2"] = 4
+    wb.save(path)
+
+
 def generate_all(out: Path = OUT) -> dict[str, Path]:
     out.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -188,6 +311,15 @@ def generate_all(out: Path = OUT) -> dict[str, Path]:
         "word_image_baseline": out / "word_image_baseline.docx",
         "word_image_swapped": out / "word_image_swapped.docx",
         "word_image_removed": out / "word_image_removed.docx",
+        "excel_package_baseline": out / "excel_package_baseline.xlsx",
+        "excel_package_stripped": out / "excel_package_stripped.xlsx",
+        "excel_package_modified": out / "excel_package_modified.xlsx",
+        "excel_package_volatile": out / "excel_package_volatile.xlsx",
+        "excel_native_rich": out / "excel_native_rich.xlsx",
+        "excel_native_edited": out / "excel_native_edited.xlsx",
+        "word_package_baseline": out / "word_package_baseline.docx",
+        "word_package_stripped": out / "word_package_stripped.docx",
+        "word_package_modified": out / "word_package_modified.docx",
     }
     make_excel_baseline(paths["excel_baseline"])
     make_excel_good_edit(paths["excel_baseline"], paths["excel_good"])
@@ -206,6 +338,30 @@ def generate_all(out: Path = OUT) -> dict[str, Path]:
     make_word_with_image(paths["word_image_baseline"], blue)
     make_word_with_image(paths["word_image_swapped"], red)
     make_word_with_image(paths["word_image_removed"], None)
+
+    make_excel_native_rich(paths["excel_native_rich"], blue)
+    make_excel_native_edit(paths["excel_native_rich"], paths["excel_native_edited"])
+
+    excel_parts = excel_package_parts("FINANCE")
+    rewrite_zip(paths["excel_baseline"], paths["excel_package_baseline"],
+                add=excel_parts)
+    rewrite_zip(paths["excel_package_baseline"], paths["excel_package_stripped"],
+                drop=tuple(excel_parts))
+    rewrite_zip(paths["excel_package_baseline"], paths["excel_package_modified"],
+                add=excel_package_parts("NOBODY"))
+    rewrite_zip(paths["excel_package_baseline"], paths["excel_package_volatile"],
+                add=volatile_variants(paths["excel_package_baseline"]))
+
+    word_parts = word_package_parts("FINANCE")
+    rewrite_zip(paths["word_baseline"], paths["word_package_baseline"],
+                add=word_parts)
+    # The python-docx template already ships customXml and declares it in the
+    # content types, so removing that part would make the file unopenable
+    # rather than merely damaged.  Its removal is covered on the Excel side.
+    rewrite_zip(paths["word_package_baseline"], paths["word_package_stripped"],
+                drop=tuple(n for n in word_parts if not n.startswith("customXml/")))
+    rewrite_zip(paths["word_package_baseline"], paths["word_package_modified"],
+                add=word_package_parts("NOBODY"))
     return paths
 
 

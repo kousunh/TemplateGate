@@ -9,10 +9,11 @@ the VBA project hash.  Extraction is read-only.
 from __future__ import annotations
 
 import hashlib
-import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
+
+from ..core.package import take_package_snapshot
 
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
@@ -163,15 +164,10 @@ def take_snapshot(path: str | Path) -> dict:
     for name, dn in wb_formula.defined_names.items():
         defined_names[name] = dn.value
 
-    vba_sha256 = None
-    with zipfile.ZipFile(path) as zf:
-        if "xl/vbaProject.bin" in zf.namelist():
-            vba_sha256 = hashlib.sha256(zf.read("xl/vbaProject.bin")).hexdigest()
-
     return {
         "target": "excel",
         "format": path.suffix.lstrip(".").lower(),
         "sheets": sheets,
         "defined_names": defined_names,
-        "vba_sha256": vba_sha256,
+        "package": take_package_snapshot(path),
     }

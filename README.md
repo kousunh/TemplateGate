@@ -18,6 +18,12 @@ policy allows were made**.
   conditional formatting, data validation, sheet structure, images (count /
   content hash / position / size), headers & footers, print settings, VBA,
   Word paragraphs / tables / sections.
+- **Catches what editing tools silently throw away** — charts, pivot tables,
+  comments, embedded objects, custom XML, and Excel shapes & textboxes are read
+  straight out of the document's internal package. That means damage is caught
+  even when the tool that made the edit could not represent those parts in the
+  first place — the failure mode where you get a file back that opens fine and
+  looks fine, minus its charts.
 - **Optional semantic checks** — `off` (default; nothing ever leaves your
   machine), `review` (AI findings as warnings), or `gate` (AI findings affect
   PASS/FAIL). Bring your own model — TemplateGate does not pin a vendor.
@@ -79,9 +85,30 @@ protect:
 structural:
   sheets: strict                  # adding/removing/hiding sheets fails
   images: strict
+  charts: strict                  # so does losing a chart, a pivot table,
+  pivot_tables: strict            # a comment, an embedded object, custom XML,
+  comments: strict                # or an Excel shape / textbox
 semantic:
   mode: "off"                     # off | review | gate
 ```
+
+Every structural category is `strict` unless you say otherwise — deleting the
+line does not turn it off. Set one to `ignore` to opt out. `templategate init`
+writes them all out for you.
+
+The package categories are `charts`, `pivot_tables`, `drawings` (shapes and
+textboxes), `comments`, `embedded`, and `custom_xml`. Each doubles as an
+attribute name in `allow` / `protect`, and individual parts are addressable:
+
+```yaml
+protect:
+  - selector: "package#*"                              # every package part
+  - selector: "package#charts:*"                       # one whole category
+  - selector: "package#charts:xl/charts/chart1.xml"    # one specific part
+```
+
+The VBA project keeps its own `vba` selector and attribute rather than living
+under `package#`.
 
 Other commands:
 
@@ -134,8 +161,9 @@ summary either way. It exposes two outputs, `passed` (`true` / `false`) and
 ## What TemplateGate is not
 
 - Not an editor, converter, or auto-repair tool.
-- Charts and shapes are not captured yet (planned; images, print settings,
-  defined names, and the VBA project are).
+- Word textboxes are not reported separately — they live inside the main
+  document part, so their text is compared along with the body rather than as
+  a distinct change.
 - No round-trip normalization (differences introduced by re-saving in another
   Office application are out of scope).
 - No visual/PDF regression.

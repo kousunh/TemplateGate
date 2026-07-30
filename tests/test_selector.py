@@ -69,6 +69,28 @@ def test_sheet_level_kind_selectors():
     assert not match_selector("Sheet1#print", "Sheet1!B2")
 
 
+def test_package_part_selectors():
+    chart = "package#charts:xl/charts/chart1.xml"
+    drawing = "package#drawings:xl/drawings/drawing1.xml"
+    assert match_selector("*", chart)
+    assert match_selector("package#*", chart)
+    assert match_selector("package#charts:*", chart)
+    assert not match_selector("package#charts:*", drawing)
+    assert match_selector(chart, chart)
+    assert not match_selector("package#charts:xl/charts/chart2.xml", chart)
+
+
+def test_package_selectors_do_not_cross_into_sheet_locations():
+    chart = "package#charts:xl/charts/chart1.xml"
+    assert not match_selector("package#*", "Sheet1!B2")
+    assert not match_selector("package#*", "vba")
+    assert not match_selector("Sheet1", chart)
+    assert not match_selector("Sheet1!A1:Z100", chart)
+    # A sheet that happens to be called "package" stays unaffected.
+    assert match_selector("package", "package!B2")
+    assert not match_selector("package", chart)
+
+
 def test_attribute_matching():
     assert match_attributes(["*"], "value")
     assert match_attributes(["value", "formula"], "value")

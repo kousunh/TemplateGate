@@ -23,6 +23,17 @@ Initial release.
   images, headers and footers, print settings, VBA.
 - Word (`.docx`) checks: paragraphs, tables, styles, sections, headers and
   footers, images.
+- OOXML package-part detection, read directly from the document's zip
+  container rather than through an editing library, so parts that a library
+  cannot represent are still compared. Covers `charts`, `pivot_tables`,
+  `drawings` (shapes and textboxes), `comments`, `embedded`, and
+  `custom_xml`, each available both as a `structural` key (default `strict`,
+  set to `ignore` to opt out) and as an attribute in `allow` / `protect`.
+  Parts are addressable as `package#*`, `package#<category>:*`, or by exact
+  part name. Drawings are compared by shape summary rather than raw bytes, so
+  the presentation defaults an editing library injects on a legitimate save
+  do not raise false alarms. The VBA project keeps its existing `vba`
+  selector, attribute, and location.
 - Optional semantic review (`off` / `review` / `gate`) through a
   user-supplied command; no vendor is pinned and `off` performs no network
   calls.

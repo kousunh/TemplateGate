@@ -8,6 +8,8 @@ from pathlib import Path
 
 from docx import Document
 
+from ..core.package import take_package_snapshot
+
 
 def _s(value) -> str:
     """Stringify a font property so signatures stay comparable and sortable."""
@@ -111,4 +113,5 @@ def take_snapshot(path: str | Path) -> dict:
         "sections": sections,
         "header_footer": header_footer,
         "images": sorted(images),
+        "package": take_package_snapshot(path),
     }

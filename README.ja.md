@@ -16,6 +16,12 @@ Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の�
 - **決定的な構造検査** — セル値・数式・書式・結合セル・条件付き書式・
   データ検証・シート構造・画像(数/内容ハッシュ/位置/サイズ)・
   ヘッダーフッター・印刷設定・VBA・Wordの段落/表/セクション。
+- **編集ツールが黙って捨てたものを検出** — グラフ・ピボットテーブル・
+  コメント・埋め込みオブジェクト・カスタムXML、そして Excel の図形・
+  テキストボックスを、文書内部のパッケージから直接読み取ります。
+  そのため、**編集に使ったツールがそれらを扱えなかった場合でも**破損を
+  検出できます。「ファイルは正常に開くし見た目も問題ない、ただしグラフが
+  消えている」という壊れ方こそ、この検査が捉えるものです。
 - **意味解析は任意** — `off`(既定。文書内容は一切外部送信されない)/
   `review`(警告のみ)/ `gate`(合否判定に含める)。モデル・ベンダーは利用者が選択。
 - **編集ツールではない** — TemplateGate は文書を一切変更せず、自動修復もしません。
@@ -74,9 +80,31 @@ protect:
 structural:
   sheets: strict                  # シートの追加/削除/非表示化はFAIL
   images: strict
+  charts: strict                  # グラフ・ピボットテーブル・コメント・
+  pivot_tables: strict            # 埋め込みオブジェクト・カスタムXML・
+  comments: strict                # Excelの図形/テキストボックスの消失もFAIL
 semantic:
   mode: "off"                     # off | review | gate
 ```
+
+structural の各カテゴリは、書かなくても既定で `strict` です(行を消しても
+無効にはなりません)。除外したい場合は `ignore` を指定します。
+`templategate init` は全カテゴリを明示的に書き出します。
+
+パッケージのカテゴリは `charts` / `pivot_tables` / `drawings`(図形・
+テキストボックス)/ `comments` / `embedded` / `custom_xml` の6つ。
+これらは `allow` / `protect` の attributes 名としても使え、
+個別のパートも指定できます:
+
+```yaml
+protect:
+  - selector: "package#*"                              # すべてのパッケージパート
+  - selector: "package#charts:*"                       # カテゴリ単位
+  - selector: "package#charts:xl/charts/chart1.xml"    # 特定のパートのみ
+```
+
+VBAプロジェクトは `package#` 配下ではなく、従来どおり `vba` セレクタ・
+`vba` 属性で指定します。
 
 その他のコマンド:
 
@@ -130,7 +158,8 @@ JSONレポートを解釈 → **FAILを通すためにポリシーを書き換�
 ## TemplateGate がやらないこと
 
 - 編集・変換・自動修復
-- グラフ・図形は未対応(対応予定。画像・印刷設定・定義名・VBAプロジェクトは対応済み)
+- Wordのテキストボックスの個別報告(本文パート内にあるため、本文テキストの
+  一部として比較されます)
 - 別のOfficeアプリで保存し直した際の差分の正規化(Round-trip)
 - PDF・見た目のリグレッション検査
 - クラウドへのアップロード(semantic `off` なら通信ゼロ)

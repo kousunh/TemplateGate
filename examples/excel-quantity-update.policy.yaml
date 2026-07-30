@@ -18,6 +18,15 @@ structural:
   sheets: strict
   images: strict
   defined_names: strict
+  # A quantity edit has no business touching any of these. They are strict by
+  # default; spelled out here because losing one is the quiet failure — the
+  # workbook still opens, the numbers are still right, and the chart is gone.
+  charts: strict
+  pivot_tables: strict
+  drawings: strict          # shapes and textboxes
+  comments: strict
+  embedded: strict          # embedded/OLE objects
+  custom_xml: strict
 
 semantic:
   mode: "off"

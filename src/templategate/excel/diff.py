@@ -14,9 +14,9 @@ from ..core.model import (
     ATTR_PRINT_SETTINGS,
     ATTR_SHEET_STRUCTURE,
     ATTR_VALUE,
-    ATTR_VBA,
     Change,
 )
+from ..core.package import diff_packages
 
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
@@ -117,10 +117,9 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
         if old != new:
             changes.append(Change(f"name:{name}", ATTR_DEFINED_NAMES, old=old, new=new))
 
-    if base.get("vba_sha256") != cand.get("vba_sha256"):
-        changes.append(Change("vba", ATTR_VBA,
-                              old=base.get("vba_sha256"), new=cand.get("vba_sha256"),
-                              detail="VBA project changed"))
+    # Charts, pivot tables, shapes, VBA and friends live outside anything
+    # openpyxl models, so they are compared straight from the zip.
+    changes.extend(diff_packages(base, cand))
     return changes
 
 

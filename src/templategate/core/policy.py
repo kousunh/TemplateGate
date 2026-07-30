@@ -170,6 +170,13 @@ structural:
   sheets: strict           # strict | ignore
   images: strict
   defined_names: strict
+  # OOXML parts that editing libraries drop on save without warning.
+  charts: strict
+  pivot_tables: strict
+  drawings: strict         # textboxes, shapes and chart frames
+  comments: strict
+  embedded: strict         # embedded/OLE objects
+  custom_xml: strict
 
 semantic:
   mode: "off"              # off | review | gate
@@ -196,6 +203,11 @@ protect:
 structural:
   images: strict
   tables: strict
+  # OOXML parts that editing libraries drop on save without warning.
+  charts: strict
+  comments: strict
+  embedded: strict         # embedded/OLE objects
+  custom_xml: strict
 
 semantic:
   mode: "off"

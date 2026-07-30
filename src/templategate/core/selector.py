@@ -17,7 +17,13 @@ Word selectors:
     "table2!r1c2"         a single table cell
     "section1"            a section (page setup / header / footer)
 
-Locations are produced by the extractors (see excel/diff.py and word/diff.py).
+OOXML package parts (both targets):
+    "package#*"                          any package part
+    "package#charts:*"                   any part in one category
+    "package#charts:xl/charts/chart1.xml"  one specific part
+
+Locations are produced by the extractors (see excel/diff.py, word/diff.py and
+core/package.py).
 """
 
 from __future__ import annotations
@@ -36,6 +42,10 @@ def _cell_to_tuple(coord: str) -> tuple[int, int]:
 # Sheet-level location kinds that follow the "#" separator.  Anything else
 # after a "#" is part of the sheet name — "#" is legal in Excel sheet names.
 _LOCATION_KINDS = ("print", "header_footer")
+
+# Package-part locations live in their own namespace, matched before any
+# sheet-name parsing so a sheet called "package" cannot collide with them.
+_PACKAGE_PREFIX = "package#"
 
 # Excel grid limits, used to close the open ends of whole-column ("B:B") and
 # whole-row ("4:4") ranges, for which openpyxl reports None boundaries.
@@ -109,6 +119,19 @@ def match_selector(selector: str, location: str) -> bool:
             return sel_rest == "*" or sel_rest == loc_rest
     if selector == "vba":
         return location == "vba"
+
+    # OOXML package parts: "package#<category>:<partname>".
+    if selector.startswith(_PACKAGE_PREFIX) or location.startswith(_PACKAGE_PREFIX):
+        if not (selector.startswith(_PACKAGE_PREFIX)
+                and location.startswith(_PACKAGE_PREFIX)):
+            return False
+        sel_rest = selector[len(_PACKAGE_PREFIX):]
+        loc_rest = location[len(_PACKAGE_PREFIX):]
+        if sel_rest == "*":
+            return True
+        if sel_rest.endswith(":*"):
+            return loc_rest.startswith(sel_rest[:-1])  # whole category
+        return sel_rest == loc_rest
 
     # Word-style selectors.
     if selector == "body":
