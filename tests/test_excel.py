@@ -117,11 +117,17 @@ def test_unrelated_add_and_remove_keeps_neutral_wording(tmp_path):
     _sheet_with_values(candidate, "Notes", {"A1": "totally", "B1": "different"})
 
     changes = diff(baseline, candidate)
-    details = {c.location: c.detail for c in changes if c.location.startswith("sheet:")}
+    structural = [c for c in changes if c.location.startswith("sheet:")]
+    details = {c.location: c.detail for c in structural}
     assert details == {
-        "sheet:Plan": "sheet removed; contents compared against 'Notes'",
-        "sheet:Notes": "sheet added; contents compared against 'Plan'",
+        "sheet:Plan":
+            "sheet removed (contents compared against 'Notes', which is not a rename)",
+        "sheet:Notes":
+            "sheet added (contents compared against 'Plan', which is not a rename)",
     }
+    # A deletion must read as a deletion: nothing survived under a new name.
+    removed = {c.location: c for c in structural}["sheet:Plan"]
+    assert (removed.old, removed.new) == ("present", None)
     assert any(c.location == "Plan!A1" for c in changes)
 
 

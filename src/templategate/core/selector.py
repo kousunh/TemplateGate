@@ -71,21 +71,68 @@ def _bounds(ref: str) -> tuple[int, int, int, int] | None:
     )
 
 
+def needs_quoting(sheet: str) -> bool:
+    """Whether a sheet name would be ambiguous written bare."""
+    return any(character in sheet for character in "'!#") or sheet != sheet.strip()
+
+
+def quote_sheet(sheet: str) -> str:
+    """A sheet name written so it can only be read as a sheet name.
+
+    Excel's own convention: ``'Q1!Q4'!A1`` is cell A1 of the sheet called
+    "Q1!Q4", where bare ``Q1!Q4`` is cell Q4 of the sheet called "Q1".  Two
+    different things that look the same, so the one that would otherwise be
+    misread gets quoted.
+    """
+    if not needs_quoting(sheet):
+        return sheet
+    return "'" + sheet.replace("'", "''") + "'"
+
+
+def _split_quoted(location: str) -> tuple[str, str] | None:
+    """Split a leading 'quoted sheet name' from the rest, or None."""
+    if not location.startswith("'"):
+        return None
+    index = 1
+    name: list[str] = []
+    while index < len(location):
+        character = location[index]
+        if character == "'":
+            if location[index + 1:index + 2] == "'":  # an escaped quote
+                name.append("'")
+                index += 2
+                continue
+            return "".join(name), location[index + 1:]
+        name.append(character)
+        index += 1
+    return None  # unterminated quote: not a quoted name at all
+
+
 def _split_sheet(location: str) -> tuple[str, str, str]:
     """Split "Sheet1!B2" / "Sheet1#print" into (sheet, separator, rest).
 
-    Sheet names may themselves contain "!" and "#", so the split happens at
-    the *last* separator, "#" only counts when what follows it is a known
+    A quoted name is unambiguous and is honoured first.  Otherwise sheet
+    names may themselves contain "!" and "#", so the split happens at the
+    *last* separator, "#" only counts when what follows it is a known
     location kind, and "!" only when what follows it is a real A1 range.
     ``separator`` is "" for a bare sheet name.
     """
+    quoted = _split_quoted(location)
+    if quoted is not None:
+        sheet, rest = quoted
+        if not rest:
+            return sheet, "", ""
+        if rest[0] in "!#":
+            return sheet, rest[0], rest[1:]
+        return sheet, "", ""
+
     bang = location.rfind("!")
     hash_ = location.rfind("#")
     if hash_ > bang and _is_location_kind(location[hash_ + 1:]):
-        return location[:hash_].strip("'"), "#", location[hash_ + 1:]
+        return location[:hash_], "#", location[hash_ + 1:]
     if bang != -1 and _bounds(location[bang + 1:]) is not None:
-        return location[:bang].strip("'"), "!", location[bang + 1:]
-    return location.strip("'"), "", ""
+        return location[:bang], "!", location[bang + 1:]
+    return location, "", ""
 
 
 def _range_contains(outer: str, inner: str) -> bool:

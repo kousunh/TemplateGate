@@ -51,10 +51,20 @@ def _val(element, attribute: str = "val"):
     return element.get(W + attribute)
 
 
-def _attrs(element, names: tuple[str, ...]) -> tuple:
+def _named(element, prefix: str, names: tuple[str, ...]) -> dict[str, str]:
+    """Attributes that are actually set, under dotted names.
+
+    Sparse and named so a difference reports as "indent.left 0 -> 3600"
+    rather than as two positional tuples the reader has to line up by eye.
+    """
     if element is None:
-        return tuple(None for _ in names)
-    return tuple(element.get(W + name) for name in names)
+        return {}
+    found = {}
+    for name in names:
+        value = element.get(W + name)
+        if value is not None:
+            found[f"{prefix}.{name}"] = value
+    return found
 
 
 def displayed_text(element) -> str:
@@ -91,30 +101,38 @@ def displayed_text(element) -> str:
 
 
 def _run_format(run_properties) -> tuple:
-    """One run's direct formatting, including whether it is hidden at all."""
+    """One run's direct formatting, as the properties it actually sets.
+
+    Sparse on purpose: a run with no properties yields nothing rather than a
+    row of Nones, so comparing two runs names the property that differs
+    ("size 24 -> 8") instead of listing every property either of them could
+    have had.
+    """
     if run_properties is None:
         return ()
-    fonts = run_properties.find(W + "rFonts")
-    color = run_properties.find(W + "color")
-    size = run_properties.find(W + "sz")
-    highlight = run_properties.find(W + "highlight")
-    underline = run_properties.find(W + "u")
-    shading = run_properties.find(W + "shd")
-    flags = []
+    fields: dict[str, str] = {}
     for name in _RUN_PROPERTIES:
         node = run_properties.find(W + name)
         if node is not None:
             # An empty w:b means on; w:b w:val="0" means off.
-            flags.append((name, _val(node) or "1"))
-    return (
-        tuple(flags),
-        ("fonts", _attrs(fonts, ("ascii", "hAnsi", "eastAsia", "cs"))),
-        ("size", _val(size)),
-        ("color", _val(color)),
-        ("underline", _val(underline)),
-        ("highlight", _val(highlight)),
-        ("shading", _attrs(shading, ("val", "color", "fill"))),
-    )
+            fields[name] = _val(node) or "1"
+    for name, label in (("sz", "size"), ("szCs", "size.complex"),
+                        ("color", "color"), ("u", "underline"),
+                        ("highlight", "highlight"), ("spacing", "spacing")):
+        value = _val(run_properties.find(W + name))
+        if value is not None:
+            fields[label] = value
+    for element_name, label, attributes in (
+            ("rFonts", "font", ("ascii", "hAnsi", "eastAsia", "cs")),
+            ("shd", "shading", ("val", "color", "fill"))):
+        node = run_properties.find(W + element_name)
+        if node is None:
+            continue
+        for attribute in attributes:
+            value = node.get(W + attribute)
+            if value is not None:
+                fields[f"{label}.{attribute}"] = value
+    return tuple(sorted(fields.items()))
 
 
 def _run_formats(element) -> list[tuple]:
@@ -144,27 +162,33 @@ def paragraph_properties(paragraph) -> tuple:
     properties = paragraph.find(W + "pPr")
     if properties is None:
         return ()
-    numbering = properties.find(W + "numPr")
+    fields: dict[str, object] = {}
+    alignment = _val(properties.find(W + "jc"))
+    if alignment is not None:
+        fields["alignment"] = alignment
+    fields.update(_named(properties.find(W + "ind"), "indent",
+                         ("left", "right", "firstLine", "hanging", "start", "end")))
+    fields.update(_named(properties.find(W + "spacing"), "spacing",
+                         ("before", "after", "line", "lineRule")))
+    fields.update(_named(properties.find(W + "framePr"), "frame",
+                         ("w", "h", "x", "y")))
     tabs = properties.find(W + "tabs")
-    return (
-        ("alignment", _val(properties.find(W + "jc"))),
-        ("indent", _attrs(properties.find(W + "ind"),
-                          ("left", "right", "firstLine", "hanging", "start", "end"))),
-        ("spacing", _attrs(properties.find(W + "spacing"),
-                           ("before", "after", "line", "lineRule"))),
-        ("tabs", tuple(sorted(
-            (_val(tab, "val"), _val(tab, "pos"))
-            for tab in (tabs.findall(W + "tab") if tabs is not None else [])
-        ))),
-        ("numbering", (_val(numbering.find(W + "numId")) if numbering is not None else None,
-                       _val(numbering.find(W + "ilvl")) if numbering is not None else None)),
-        ("flags", tuple(
-            (name, _val(properties.find(W + name)) or "1")
-            for name in _PARAGRAPH_FLAGS
-            if properties.find(W + name) is not None
-        )),
-        ("frame", _attrs(properties.find(W + "framePr"), ("w", "h", "x", "y"))),
-    )
+    if tabs is not None:
+        stops = tuple(sorted((_val(tab, "val"), _val(tab, "pos"))
+                             for tab in tabs.findall(W + "tab")))
+        if stops:
+            fields["tabs"] = stops
+    numbering = properties.find(W + "numPr")
+    if numbering is not None:
+        for child, label in (("numId", "list.id"), ("ilvl", "list.level")):
+            value = _val(numbering.find(W + child))
+            if value is not None:
+                fields[label] = value
+    for name in _PARAGRAPH_FLAGS:
+        node = properties.find(W + name)
+        if node is not None:
+            fields[name] = _val(node) or "1"
+    return tuple(sorted(fields.items()))
 
 
 def field_codes(element) -> list[str]:
@@ -212,6 +236,27 @@ def bookmarks(element) -> list[str]:
     return sorted(names)
 
 
+def breaks(element) -> tuple:
+    """Page and column breaks, which are layout the text cannot show."""
+    counts: dict[str, int] = {}
+
+    def walk(node) -> None:
+        for child in node:
+            name = _tag(child)
+            if name in ("txbxContent", "sdt", "tbl"):
+                continue
+            if name == "br":
+                counts[_val(child, "type") or "line"] = (
+                    counts.get(_val(child, "type") or "line", 0) + 1)
+            elif name == "lastRenderedPageBreak":
+                continue
+            else:
+                walk(child)
+
+    walk(element)
+    return tuple(sorted(counts.items()))
+
+
 def revision_marks(element) -> tuple[int, int]:
     """How much of this block is a tracked insertion or deletion."""
     inserted = deleted = 0
@@ -244,6 +289,7 @@ def block_of(element, style_names: dict[str, str]) -> dict:
         "fields": field_codes(element),
         "bookmarks": bookmarks(element),
         "revisions": revision_marks(element),
+        "breaks": breaks(element),
     }
 
 
@@ -256,43 +302,47 @@ def sdt_properties(sdt) -> tuple:
     properties = sdt.find(W + "sdtPr")
     if properties is None:
         return ()
-    return (
-        ("alias", _val(properties.find(W + "alias"))),
-        ("tag", _val(properties.find(W + "tag"))),
-        ("lock", _val(properties.find(W + "lock"))),
-        ("placeholder", properties.find(W + "showingPlcHdr") is not None),
-        ("kind", tuple(sorted(
-            _tag(child) for child in properties
-            if _tag(child) in ("text", "richText", "date", "dropDownList",
-                               "comboBox", "checkbox", "picture", "docPartObj")
-        ))),
-    )
+    fields: dict[str, object] = {}
+    for child, label in (("alias", "alias"), ("tag", "tag"), ("lock", "lock")):
+        value = _val(properties.find(W + child))
+        if value is not None:
+            fields[label] = value
+    if properties.find(W + "showingPlcHdr") is not None:
+        fields["placeholder"] = "1"
+    kinds = tuple(sorted(
+        _tag(child) for child in properties
+        if _tag(child) in ("text", "richText", "date", "dropDownList",
+                           "comboBox", "checkbox", "picture", "docPartObj")
+    ))
+    if kinds:
+        fields["kind"] = kinds
+    return tuple(sorted(fields.items()))
 
 
 def table_geometry(table) -> tuple:
     """Widths, borders, shading and layout of a table and its grid."""
     properties = table.find(W + "tblPr")
     grid = table.find(W + "tblGrid")
-    borders = properties.find(W + "tblBorders") if properties is not None else None
-    return (
-        ("width", _attrs(properties.find(W + "tblW") if properties is not None else None,
-                         ("w", "type"))),
-        ("layout", _val(properties.find(W + "tblLayout") if properties is not None else None,
-                        "type")),
-        ("alignment", _val(properties.find(W + "jc") if properties is not None else None)),
-        ("indent", _attrs(properties.find(W + "tblInd") if properties is not None else None,
-                          ("w", "type"))),
-        ("borders", tuple(
-            (_tag(side),) + _attrs(side, ("val", "sz", "color"))
-            for side in (borders if borders is not None else [])
-        )),
-        ("shading", _attrs(properties.find(W + "shd") if properties is not None else None,
-                           ("val", "color", "fill"))),
-        ("grid", tuple(
-            _val(column, "w")
-            for column in (grid.findall(W + "gridCol") if grid is not None else [])
-        )),
-    )
+    fields: dict[str, object] = {}
+    if properties is not None:
+        fields.update(_named(properties.find(W + "tblW"), "width", ("w", "type")))
+        fields.update(_named(properties.find(W + "tblInd"), "indent", ("w", "type")))
+        fields.update(_named(properties.find(W + "shd"), "shading",
+                             ("val", "color", "fill")))
+        layout = _val(properties.find(W + "tblLayout"), "type")
+        if layout is not None:
+            fields["layout"] = layout
+        alignment = _val(properties.find(W + "jc"))
+        if alignment is not None:
+            fields["alignment"] = alignment
+        borders = properties.find(W + "tblBorders")
+        for side in (borders if borders is not None else []):
+            fields.update(_named(side, f"border.{_tag(side)}", ("val", "sz", "color")))
+    if grid is not None:
+        columns = tuple(_val(column, "w") for column in grid.findall(W + "gridCol"))
+        if columns:
+            fields["grid"] = columns
+    return tuple(sorted(fields.items()))
 
 
 def _collect_containers(node, blocks: dict, counters: dict, styles: dict) -> None:
@@ -388,19 +438,24 @@ def walk_body(body, styles: dict) -> tuple[list, list, dict]:
 
 
 def cell_geometry(cell) -> tuple:
+    """Width, borders, shading, alignment and merge state of one cell."""
     properties = cell.find(W + "tcPr")
     if properties is None:
         return ()
+    fields: dict[str, object] = {}
+    fields.update(_named(properties.find(W + "tcW"), "width", ("w", "type")))
+    fields.update(_named(properties.find(W + "shd"), "shading",
+                         ("val", "color", "fill")))
+    span = _val(properties.find(W + "gridSpan"))
+    if span is not None:
+        fields["span"] = span
+    merge = properties.find(W + "vMerge")
+    if merge is not None:
+        fields["merged_vertically"] = _val(merge) or "continue"
+    alignment = _val(properties.find(W + "vAlign"))
+    if alignment is not None:
+        fields["valign"] = alignment
     borders = properties.find(W + "tcBorders")
-    return (
-        ("width", _attrs(properties.find(W + "tcW"), ("w", "type"))),
-        ("span", _val(properties.find(W + "gridSpan"))),
-        ("vmerge", _val(properties.find(W + "vMerge")) or
-         ("continue" if properties.find(W + "vMerge") is not None else None)),
-        ("shading", _attrs(properties.find(W + "shd"), ("val", "color", "fill"))),
-        ("valign", _val(properties.find(W + "vAlign"))),
-        ("borders", tuple(
-            (_tag(side),) + _attrs(side, ("val", "sz", "color"))
-            for side in (borders if borders is not None else [])
-        )),
-    )
+    for side in (borders if borders is not None else []):
+        fields.update(_named(side, f"border.{_tag(side)}", ("val", "sz", "color")))
+    return tuple(sorted(fields.items()))

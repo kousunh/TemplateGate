@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..core.model import CheckResult
+from .text_reporter import _grouped
 
 
 def _escape(text: str) -> str:
@@ -34,7 +35,19 @@ def render_markdown(result: CheckResult) -> str:
             "| Severity | Location | Attribute | Old | New | Rule |",
             "|---|---|---|---|---|---|",
         ]
-        for v in result.violations:
+        for group, members in _grouped(result.violations):
+            if group:
+                first, last = members[0].change, members[-1].change
+                span = (first.location if first.location == last.location
+                        else f"{first.location}..{last.location}")
+                lines.append(
+                    f"| {members[0].severity} | `{_escape(span)}` "
+                    f"| {_escape(first.attribute)} "
+                    f"| {_escape(group)} | {len(members)} knock-on changes "
+                    f"| {_escape(members[0].rule)} |"
+                )
+                continue
+            v = members[0]
             lines.append(
                 f"| {v.severity} | `{_escape(v.change.location)}` "
                 f"| {_escape(v.change.attribute)} "

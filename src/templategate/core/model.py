@@ -53,6 +53,8 @@ ATTR_FIELD = "field"
 ATTR_BOOKMARK = "bookmark"
 ATTR_REVISION = "revision"
 ATTR_CONTENT_CONTROL = "content_control"
+# A block whose content survived but whose position did not.
+ATTR_MOVED = "moved"
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
@@ -67,6 +69,11 @@ class Change:
     old: Any = None
     new: Any = None
     detail: str = ""
+    # Changes that are all knock-on effects of one edit share a group, so a
+    # report can say "one paragraph removed" instead of listing every
+    # paragraph that shifted up behind it.  Evaluation ignores this: each
+    # change is still judged on its own.
+    group: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

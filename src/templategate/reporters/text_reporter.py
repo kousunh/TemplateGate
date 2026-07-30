@@ -8,6 +8,22 @@ def _fmt(value) -> str:
     return text if len(text) <= 80 else text[:80] + "..."
 
 
+def _grouped(violations):
+    """Consecutive violations that describe one edit, folded together.
+
+    Only the human-facing reports collapse; the JSON keeps every change, and
+    the policy has already judged each of them separately.
+    """
+    runs: list[tuple[str, list]] = []
+    for violation in violations:
+        group = violation.change.group
+        if group and runs and runs[-1][0] == group:
+            runs[-1][1].append(violation)
+        else:
+            runs.append((group, [violation]))
+    return runs
+
+
 def render_text(result: CheckResult) -> str:
     lines = [
         f"TemplateGate: {'PASS' if result.passed else 'FAIL'}",
@@ -25,7 +41,17 @@ def render_text(result: CheckResult) -> str:
             lines.append("Violations (mode: review_only — reported, not blocking):")
         else:
             lines.append("Violations:")
-        for v in result.violations:
+        for group, members in _grouped(result.violations):
+            if group:
+                first, last = members[0].change, members[-1].change
+                span = (first.location if first.location == last.location
+                        else f"{first.location}..{last.location}")
+                lines.append(f"  [{members[0].severity}] {span}: "
+                             f"content shifted because {group}")
+                lines.append(f"      {len(members)} knock-on changes collapsed; "
+                             "the JSON report lists each one")
+                continue
+            v = members[0]
             lines.append(f"  [{v.severity}] {v.change.location} ({v.change.attribute}): {v.message}")
             if v.change.old is not None or v.change.new is not None:
                 lines.append(f"      old={_fmt(v.change.old)} new={_fmt(v.change.new)}")

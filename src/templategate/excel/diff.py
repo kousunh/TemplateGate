@@ -19,7 +19,9 @@ from ..core.model import (
     ATTR_VALUE,
     Change,
 )
+from ..core.describe import delta_values, describe_delta, field_delta
 from ..core.package import diff_packages
+from ..core.selector import quote_sheet
 
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
@@ -74,13 +76,20 @@ def _pair_renames(base_sheets: dict, cand_sheets: dict,
 _RENAME_SIMILARITY = 0.5
 
 
+def _is_rename(pair: tuple[str, float] | None) -> bool:
+    return pair is not None and pair[1] >= _RENAME_SIMILARITY
+
+
 def _rename_detail(plain: str, renamed: str, pair: tuple[str, float] | None) -> str:
     if pair is None:
         return f"sheet {plain}"
-    name, score = pair
-    if score >= _RENAME_SIMILARITY:
+    name, _score = pair
+    if _is_rename(pair):
         return f"sheet {renamed} {name!r}"
-    return f"sheet {plain}; contents compared against {name!r}"
+    # Two sheets that merely got paired up so their contents could still be
+    # compared.  Calling that a rename would tell the reader a sheet survived
+    # under a new name when it was in fact deleted.
+    return f"sheet {plain} (contents compared against {name!r}, which is not a rename)"
 
 
 def diff_snapshots(base: dict, cand: dict) -> list[Change]:
@@ -96,12 +105,14 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
     for name in removed:
         pair = renamed_to.get(name)
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old="present", new=pair[0] if pair else None,
+                              old="present",
+                              new=pair[0] if _is_rename(pair) else None,
                               detail=_rename_detail("removed", "renamed to", pair)))
     for name in added:
         pair = renamed_from.get(name)
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                              old=pair[0] if pair else None, new="present",
+                              old=pair[0] if _is_rename(pair) else None,
+                              new="present",
                               detail=_rename_detail("added", "renamed from", pair)))
 
     for name in sorted(base_sheets.keys() & cand_sheets.keys()):
@@ -120,12 +131,20 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
         if old != new:
             changes.append(Change(f"name:{name}", ATTR_DEFINED_NAMES, old=old, new=new))
 
+    if base.get("format") != cand.get("format"):
+        old_format, new_format = base.get("format"), cand.get("format")
+        detail = f"workbook saved as .{new_format} instead of .{old_format}"
+        if old_format == "xlsm" and new_format == "xlsx":
+            detail += "; a macro-enabled workbook saved as .xlsx loses its VBA project"
+        changes.append(Change("workbook#format", ATTR_SHEET_SETTINGS,
+                              old=old_format, new=new_format, detail=detail))
+
     if base.get("settings", ()) != cand.get("settings", ()):
-        detail = ", ".join(sorted(
-            key for key, _ in set(base.get("settings", ())) ^ set(cand.get("settings", ()))
-        ))
+        delta = field_delta(base.get("settings"), cand.get("settings"))
+        old_fields, new_fields = delta_values(delta)
         changes.append(Change("workbook#settings", ATTR_SHEET_SETTINGS,
-                              detail=f"workbook settings changed: {detail}"))
+                              old=old_fields, new=new_fields,
+                              detail=describe_delta(delta, "workbook settings changed")))
 
     # Charts, pivot tables, shapes, VBA and friends live outside anything
     # openpyxl models, so they are compared straight from the zip.
@@ -136,6 +155,7 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
 def _diff_sheet(name: str, b: dict, c: dict, *,
                 include_structure: bool = True) -> list[Change]:
     changes: list[Change] = []
+    sheet = quote_sheet(name)
 
     if include_structure:
         if b.get("kind", "worksheet") != c.get("kind", "worksheet"):
@@ -153,20 +173,25 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
     for coord in sorted(b["cells"].keys() | c["cells"].keys()):
         old = b["cells"].get(coord, _DEFAULT_CELL)
         new = c["cells"].get(coord, _DEFAULT_CELL)
-        loc = f"{name}!{coord}"
+        loc = f"{sheet}!{coord}"
         if old["value"] != new["value"]:
             changes.append(Change(loc, ATTR_VALUE, old=old["value"], new=new["value"]))
         if old["formula"] != new["formula"]:
             changes.append(Change(loc, ATTR_FORMULA, old=old["formula"], new=new["formula"]))
         if old["format"] != new["format"]:
-            changes.append(Change(loc, ATTR_FORMAT, detail="cell format changed"))
+            delta = field_delta(old["format"], new["format"])
+            old_fields, new_fields = delta_values(delta)
+            changes.append(Change(loc, ATTR_FORMAT, old=old_fields, new=new_fields,
+                                  detail=describe_delta(delta, "cell format changed")))
 
     for merged in sorted(set(b["merges"]) - set(c["merges"])):
-        changes.append(Change(f"{name}!{merged}", ATTR_MERGE,
-                              old="merged", new=None, detail="merge removed"))
+        changes.append(Change(f"{sheet}!{merged}", ATTR_MERGE,
+                              old="merged", new=None,
+                              detail="cells unmerged (the block splits back apart)"))
     for merged in sorted(set(c["merges"]) - set(b["merges"])):
-        changes.append(Change(f"{name}!{merged}", ATTR_MERGE,
-                              old=None, new="merged", detail="merge added"))
+        changes.append(Change(f"{sheet}!{merged}", ATTR_MERGE,
+                              old=None, new="merged",
+                              detail="cells merged (only the top-left value survives)"))
 
     for attr, key in ((ATTR_CONDITIONAL_FORMATTING, "conditional_formatting"),
                       (ATTR_DATA_VALIDATION, "data_validation")):
@@ -176,7 +201,7 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
                 # A sqref may list several ranges ("B2:B5 D2:D5"); report each
                 # one, or a rule covering an unmentioned range slips through.
                 for part in str(rng).split() or [str(rng)]:
-                    changes.append(Change(f"{name}!{part}", attr,
+                    changes.append(Change(f"{sheet}!{part}", attr,
                                           old=_short(old), new=_short(new)))
 
     b_imgs = {(i["sha256"], tuple(i["anchor"]) if i["anchor"] else None,
@@ -184,32 +209,34 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
     c_imgs = {(i["sha256"], tuple(i["anchor"]) if i["anchor"] else None,
                tuple(i["size"])) for i in c["images"]}
     for sha, anchor, size in sorted(b_imgs - c_imgs):
-        changes.append(Change(f"{name}#image:{sha[:8]}", ATTR_IMAGES,
+        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
                               old={"anchor": anchor, "size": size}, new=None,
                               detail="image removed, replaced, moved or resized"))
     for sha, anchor, size in sorted(c_imgs - b_imgs):
-        changes.append(Change(f"{name}#image:{sha[:8]}", ATTR_IMAGES,
+        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
                               old=None, new={"anchor": anchor, "size": size},
                               detail="image added, replaced, moved or resized"))
 
     if b.get("protection", ()) != c.get("protection", ()):
-        changes.append(Change(f"{name}#protection", ATTR_PROTECTION,
-                              old=_short(b.get("protection")),
-                              new=_short(c.get("protection")),
-                              detail="sheet protection changed"))
+        delta = field_delta(b.get("protection"), c.get("protection"))
+        old_fields, new_fields = delta_values(delta)
+        changes.append(Change(f"{sheet}#protection", ATTR_PROTECTION,
+                              old=old_fields or _short(b.get("protection")),
+                              new=new_fields or _short(c.get("protection")),
+                              detail=describe_delta(delta, "sheet protection changed")))
 
     if b.get("settings", ()) != c.get("settings", ()):
-        detail = ", ".join(sorted(
-            key for key, _ in set(b.get("settings", ())) ^ set(c.get("settings", ()))
-        ))
-        changes.append(Change(f"{name}#settings", ATTR_SHEET_SETTINGS,
-                              detail=f"sheet settings changed: {detail}"))
+        delta = field_delta(b.get("settings"), c.get("settings"))
+        old_fields, new_fields = delta_values(delta)
+        changes.append(Change(f"{sheet}#settings", ATTR_SHEET_SETTINGS,
+                              old=old_fields, new=new_fields,
+                              detail=describe_delta(delta, "sheet settings changed")))
 
     b_layout, c_layout = b.get("layout", {}), c.get("layout", {})
     for ref in sorted(b_layout.keys() | c_layout.keys()):
         old, new = b_layout.get(ref), c_layout.get(ref)
         if old != new:
-            changes.append(Change(f"{name}!{ref}", ATTR_LAYOUT,
+            changes.append(Change(f"{sheet}!{ref}", ATTR_LAYOUT,
                                   old=_short(old), new=_short(new),
                                   detail="row/column size or visibility changed"))
 
@@ -217,12 +244,12 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
     for dn in sorted(b_names.keys() | c_names.keys()):
         old, new = b_names.get(dn), c_names.get(dn)
         if old != new:
-            changes.append(Change(f"name:{name}!{dn}", ATTR_DEFINED_NAMES,
+            changes.append(Change(f"name:{sheet}!{dn}", ATTR_DEFINED_NAMES,
                                   old=old, new=new,
                                   detail="sheet-scoped defined name changed"))
 
     if b["header_footer"] != c["header_footer"]:
-        changes.append(Change(f"{name}#header_footer", ATTR_HEADER_FOOTER,
+        changes.append(Change(f"{sheet}#header_footer", ATTR_HEADER_FOOTER,
                               old=b["header_footer"], new=c["header_footer"]))
 
     if b["print"] != c["print"]:
@@ -230,7 +257,7 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
             k for k in b["print"].keys() | c["print"].keys()
             if b["print"].get(k) != c["print"].get(k)
         ))
-        changes.append(Change(f"{name}#print", ATTR_PRINT_SETTINGS,
+        changes.append(Change(f"{sheet}#print", ATTR_PRINT_SETTINGS,
                               detail=f"print settings changed: {detail}"))
     return changes
 

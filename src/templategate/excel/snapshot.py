@@ -38,21 +38,39 @@ def _side(s) -> tuple | None:
 
 
 def _format_key(cell) -> tuple | None:
-    """Normalize a cell's style into a comparable tuple. None == default."""
+    """A cell's style as named fields.  None == no style at all.
+
+    Named rather than positional so a difference can be reported as
+    "numfmt '#,##0' -> '#,##0,'" instead of an unreadable tuple.  Kept as a
+    tuple of pairs so it stays hashable and stable in JSON.
+    """
     if not cell.has_style:
         return None
     f, fill, b, a = cell.font, cell.fill, cell.border, cell.alignment
     return (
-        ("font", f.name, f.size, bool(f.bold), bool(f.italic), f.underline,
-         bool(f.strike), _color(f.color)),
-        ("fill", fill.patternType, _color(getattr(fill, "fgColor", None)),
-         _color(getattr(fill, "bgColor", None))),
-        ("border", _side(b.left), _side(b.right), _side(b.top), _side(b.bottom),
-         _side(b.diagonal)),
-        ("align", a.horizontal, a.vertical, bool(a.wrap_text), a.text_rotation,
-         a.indent),
-        ("numfmt", cell.number_format),
-        ("protect", cell.protection.locked, cell.protection.hidden),
+        ("font.name", _plain(f.name)),
+        ("font.size", _plain(f.size)),
+        ("font.bold", bool(f.bold)),
+        ("font.italic", bool(f.italic)),
+        ("font.underline", _plain(f.underline)),
+        ("font.strike", bool(f.strike)),
+        ("font.color", _color(f.color)),
+        ("fill.pattern", _plain(fill.patternType)),
+        ("fill.foreground", _color(getattr(fill, "fgColor", None))),
+        ("fill.background", _color(getattr(fill, "bgColor", None))),
+        ("border.left", _side(b.left)),
+        ("border.right", _side(b.right)),
+        ("border.top", _side(b.top)),
+        ("border.bottom", _side(b.bottom)),
+        ("border.diagonal", _side(b.diagonal)),
+        ("align.horizontal", _plain(a.horizontal)),
+        ("align.vertical", _plain(a.vertical)),
+        ("align.wrap_text", bool(a.wrap_text)),
+        ("align.rotation", _plain(a.text_rotation)),
+        ("align.indent", _plain(a.indent)),
+        ("numfmt", _plain(cell.number_format)),
+        ("protect.locked", _plain(cell.protection.locked)),
+        ("protect.hidden", _plain(cell.protection.hidden)),
     )
 
 
@@ -123,7 +141,7 @@ def _cells(ws_formula, ws_value) -> dict:
             runs = _rich_runs(cell.value)
             fmt = _format_key(cell)
             if runs is not None:
-                fmt = (fmt, ("runs", runs))
+                fmt = (fmt or ()) + (("runs", runs),)
             cached = ws_value[cell.coordinate].value if formula else cell.value
             cached = _plain(cached)
             if cached is None and formula is None and fmt is None:
