@@ -1,0 +1,12 @@
+# Normalize line endings
+* text=auto
+
+*.py text
+*.md text
+*.yml text
+*.yaml text
+*.toml text
+
+# Office documents are binary
+*.docx binary
+*.xlsx binary

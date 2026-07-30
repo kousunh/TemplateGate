@@ -1,5 +1,6 @@
 [build-system]
-requires = ["hatchling"]
+# >=1.27 for PEP 639 (`license = "MIT"` + `license-files`).
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,22 +8,31 @@ name = "templategate"
 version = "0.1.0"
 description = "Policy-as-code acceptance gate for AI-edited Excel & Word documents (.xlsx / .xlsm / .docx). Verifies that only intended changes were made."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "TemplateGate contributors" }]
 keywords = ["excel", "word", "office", "regression-testing", "ai-safety", "policy-as-code", "diff"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business",
   "Topic :: Software Development :: Quality Assurance",
+  "Typing :: Typed",
 ]
 dependencies = [
   "openpyxl>=3.1",
   "python-docx>=1.1",
   "PyYAML>=6.0",
+  # Required, not optional: openpyxl silently drops embedded images when
+  # Pillow is missing, which would let image changes slip through the gate.
+  "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +42,10 @@ dev = ["pytest>=8.0"]
 templategate = "templategate.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/kousunh/templategate"
+Homepage = "https://github.com/kousunh/TemplateGate"
+Repository = "https://github.com/kousunh/TemplateGate"
+Issues = "https://github.com/kousunh/TemplateGate/issues"
+Changelog = "https://github.com/kousunh/TemplateGate/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/templategate"]

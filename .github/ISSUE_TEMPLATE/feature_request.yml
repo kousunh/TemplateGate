@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a check, selector, or reporter
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TemplateGate only reads documents. Requests for editing, converting, or
+        auto-repairing a document are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve
+      description: What did an AI edit break that TemplateGate did not catch?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: If it affects the policy schema, sketch the YAML.
+    validations:
+      required: true

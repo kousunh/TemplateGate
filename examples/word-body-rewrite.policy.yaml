@@ -1,6 +1,5 @@
 # Example: an agent may rewrite body paragraphs of a fictional business plan,
-# but tables, styles, sections and images must stay untouched.
-# Semantic review is enabled as warnings via a user-chosen command.
+# but tables, styles, run formatting, sections and images must stay untouched.
 version: 1
 target: word
 mode: normal_input
@@ -11,17 +10,21 @@ allow:
 
 protect:
   - selector: "*"
-    attributes: [style, section, header_footer, table]
+    attributes: [style, format, section, header_footer, table]
 
 structural:
   images: strict
   tables: strict
 
 semantic:
-  mode: review            # findings are warnings; they never flip PASS/FAIL
-  provider: command
-  command: ""             # e.g. "claude -p" or any CLI that reads stdin & prints JSON
-  model: ""               # your choice — TemplateGate does not pin a vendor
-  checks:
-    - "日付や期間に矛盾がないこと"
-    - "旧名称が本文に残っていないこと"
+  mode: "off"             # off | review | gate
+  # Optional AI review. Set mode to "review" (findings are warnings and never
+  # flip PASS/FAIL) or "gate" (findings do affect it), then uncomment below and
+  # supply a command — until one is set, a non-off mode only reports a
+  # configuration error. TemplateGate does not pin a vendor.
+  # provider: command
+  # command: "claude -p"  # any CLI that reads the prompt on stdin & prints JSON
+  # model: ""             # passed to the command as $TEMPLATEGATE_MODEL
+  # checks:
+  #   - "日付や期間に矛盾がないこと"
+  #   - "旧名称が本文に残っていないこと"

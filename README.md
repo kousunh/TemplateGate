@@ -1,5 +1,7 @@
 # TemplateGate
 
+[![CI](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml/badge.svg)](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml)
+
 **Policy-as-code acceptance gate for AI-edited Excel & Word documents.**
 
 日本語版は [README.ja.md](README.ja.md) をどうぞ。
@@ -101,17 +103,32 @@ and **never** edit the policy to make a failing check pass.
 
 ## GitHub Action
 
+`action.yml` lives in the `action/` subdirectory, so the `uses:` path has to
+include it. The runner fetches TemplateGate itself — you only check out *your*
+repository so the documents and the policy are on disk.
+
 ```yaml
-- uses: <owner>/templategate/action@v1
+- uses: actions/checkout@v4
+- uses: actions/setup-python@v5
+  with:
+    python-version: "3.12"
+- uses: kousunh/TemplateGate/action@v1
   with:
     baseline: docs/plan_baseline.xlsx
     candidate: docs/plan.xlsx
     policy: .templategate/plan.policy.yaml
 ```
 
+The step fails the job when the check fails, and appends the report to the job
+summary either way. It exposes two outputs, `passed` (`true` / `false`) and
+`report-path`; to read them instead of failing the job, add
+`continue-on-error: true` to the step.
+
 ## What TemplateGate is not
 
 - Not an editor, converter, or auto-repair tool.
+- Charts, shapes, and VBA presence are not captured yet (planned; images,
+  print settings, and defined names are).
 - No round-trip normalization (differences introduced by re-saving in another
   Office application are out of scope).
 - No visual/PDF regression.

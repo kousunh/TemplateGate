@@ -1,5 +1,7 @@
 # TemplateGate
 
+[![CI](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml/badge.svg)](https://github.com/kousunh/TemplateGate/actions/workflows/ci.yml)
+
 **AIが編集した Excel・Word 文書のための、Policy-as-code 受入ゲート。**
 
 English version: [README.md](README.md)
@@ -94,9 +96,34 @@ ChatGPT 互換)が入っています。「コピーを編集 → `templategate c
 JSONレポートを解釈 → **FAILを通すためにポリシーを書き換えることは絶対にしない**」
 という安全な作業手順をエージェントに教えます。
 
+## GitHub Action
+
+`action.yml` は `action/` サブディレクトリにあるため、`uses:` のパスにも
+`/action` を含めます。TemplateGate 本体はランナーが自動で取得するので、
+利用者側は**自分のリポジトリ**をチェックアウトするだけで構いません
+(検査対象の文書とポリシーをディスク上に置くため)。
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-python@v5
+  with:
+    python-version: "3.12"
+- uses: kousunh/TemplateGate/action@v1
+  with:
+    baseline: docs/plan_baseline.xlsx
+    candidate: docs/plan.xlsx
+    policy: .templategate/plan.policy.yaml
+```
+
+検査がFAILするとジョブも失敗します。レポートは成否にかかわらず
+ジョブサマリーに出力されます。出力は `passed`(`true` / `false`)と
+`report-path` の2つ。ジョブを失敗させずに出力だけ読みたい場合は、
+ステップに `continue-on-error: true` を付けてください。
+
 ## TemplateGate がやらないこと
 
 - 編集・変換・自動修復
+- グラフ・図形・VBAの有無は未対応(対応予定。画像・印刷設定・定義名は対応済み)
 - 別のOfficeアプリで保存し直した際の差分の正規化(Round-trip)
 - PDF・見た目のリグレッション検査
 - クラウドへのアップロード(semantic `off` なら通信ゼロ)

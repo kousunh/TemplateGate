@@ -38,6 +38,12 @@ this workflow exactly.
      e.g. restore the destroyed formula — and re-run. If you cannot fix it,
      deliver nothing: quarantine the candidate, show the violations to the
      user, and let them decide.
+
+     One broken cell often yields more than one entry: value and formula are
+     compared independently, so overwriting `=SUM(D4:D6)` with a literal
+     reports both a `value` violation and a `formula` one at the same
+     location. Restoring the formula clears both — fix the cause, not each
+     entry.
    - exit code `2`: an execution error (bad path, invalid policy). Fix the
      invocation, not the document.
 
