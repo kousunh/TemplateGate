@@ -8,6 +8,18 @@ mode: normal_input
 allow:
   - selector: "計画表!B4:B6"
     attributes: [value]
+  # If the edit is made in Excel itself rather than by a library, Excel
+  # recalculates on save and the cached results of dependent formulas change
+  # too — so a policy this narrow would fail a correct edit. Allow the
+  # computed ranges as well, and the chart caches if the workbook has charts:
+  #
+  #   - selector: "計画表!D4:D8"        # results of the dependent formulas
+  #     attributes: [value]
+  #   - selector: "package#charts:*"    # caches Excel refreshes on save
+  #     attributes: [charts]
+  #
+  # That stays safe because `formula` below is still protected: the results
+  # may move, the formulas that produce them may not.
 
 protect:
   - selector: "*"

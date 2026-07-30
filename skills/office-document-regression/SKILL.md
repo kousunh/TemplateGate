@@ -94,6 +94,16 @@ the page, so it is reported as a `text` change and a `revision` change.
 Anything in a block that no named attribute covers is still compared, under
 `markup`. There is no way to make an edit that the report will not mention.
 
+## If you are driving Excel itself
+
+Editing through Excel (COM/automation) is different from editing with a
+library: Excel recalculates dependent formulas and refreshes chart caches on
+every save. Cells you never touched will differ, and that is expected, not
+damage. If the policy allows only the cells you edited, a correct edit still
+FAILs — report that to the user as a policy that needs widening on the
+computed ranges, rather than assuming you broke the file. Do not edit the
+policy yourself.
+
 ## Hard rules
 
 - **NEVER modify the policy file to make a failing check pass.** The policy

@@ -140,6 +140,50 @@ templategate diff --baseline plan.xlsx --candidate plan.edited.xlsx
 `diff` を実行することは、使っている編集ツールが途中で何を壊すかを
 知る方法でもあります。
 
+### 実際の Excel で編集する場合
+
+編集を Excel 本体で行う場合(人が操作する場合も、エージェントが COM 経由で
+操作する場合も)、**正しく許可された編集であっても、触ったセル以外が
+変わります**。Excel は保存のたびに依存する数式を再計算し、グラフの
+キャッシュを更新するためです。つまり誰も編集していない箇所が正当に
+変化します。対象セルだけを allow したポリシーは、まったく正しい編集を
+FAIL させてしまいます。
+
+実際のブックで数量セルを**1つだけ**編集したところ、変更は5件になりました。
+その値自体、それに依存する数式2つの計算結果、配列数式の結果、そして
+グラフが保持している系列データのキャッシュです。
+
+対処のレシピ:
+
+```yaml
+allow:
+  - selector: "Sales!B3:B5"        # 実際に編集するセル
+    attributes: [value]
+  - selector: "Sales!D3:D7"        # それに依存する数式の計算結果
+    attributes: [value]
+  - selector: "Sales!G3:G5"        # 配列数式の結果(見落としやすい)
+    attributes: [value]
+  - selector: "package#charts:*"   # 保存時に更新されるグラフのキャッシュ
+    attributes: [charts]
+protect:
+  - selector: "*"
+    attributes: [formula, format, merge, conditional_formatting,
+                 data_validation, print_settings, header_footer, vba]
+```
+
+計算結果の範囲に `value` を広めに許可しても安全なのは、**`formula` を
+protect したままにしている**からです。結果は動いてよいが、それを生む
+数式そのものは動かしてはいけない、という指定になります。数式がリテラルで
+上書きされれば `formula` 属性として従来どおり検出されます。
+
+`package#charts:*` を許可すると、グラフ定義そのものへの意図的な変更は
+通ってしまいます。ただしグラフの**存在**は守られます。グラフを削除すると
+シートに紐づける drawing パートも消えるため、`drawings` が検出します。
+
+なお、Excel ではなくライブラリでファイルを編集する場合、この話は当て
+はまりません。再計算が起きないので連鎖は発生せず、狭いポリシーのままで
+正しく動きます。
+
 ### モードの選択
 
 ```yaml

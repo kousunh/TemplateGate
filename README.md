@@ -140,6 +140,48 @@ rule would use. Allow the ones that were the point of the edit, and leave
 everything else to default deny. Running `diff` on a *legitimate* edit is also
 how you find out what your editing tool damages on the way past.
 
+### Editing in real Excel
+
+If the edit is made in Excel itself — by a person, or by an agent driving it
+through COM — then a *correct, allowed* edit still changes more than the cell
+you touched. Excel recalculates dependent formulas and refreshes chart caches
+on every save, so the file legitimately differs in places nobody edited. A
+policy that allows only the target cells will fail a perfectly good edit.
+
+Editing a *single* quantity cell in a real workbook produced five changes: the
+value itself, the cached results of two formulas that depend on it, the result
+of an array formula, and the chart's cached copy of the series data.
+
+The recipe:
+
+```yaml
+allow:
+  - selector: "Sales!B3:B5"        # the cells actually being edited
+    attributes: [value]
+  - selector: "Sales!D3:D7"        # results of formulas that depend on them
+    attributes: [value]
+  - selector: "Sales!G3:G5"        # array-formula results — easy to forget
+    attributes: [value]
+  - selector: "package#charts:*"   # chart caches Excel refreshes on save
+    attributes: [charts]
+protect:
+  - selector: "*"
+    attributes: [formula, format, merge, conditional_formatting,
+                 data_validation, print_settings, header_footer, vba]
+```
+
+Allowing `value` generously on computed ranges is safe **because `formula`
+stays protected**: the results may move, but the rules that produce them may
+not. A formula overwritten with a literal is still caught, under `formula`.
+
+Allowing `package#charts:*` does mean a deliberate edit to a chart's own
+definition would pass. The chart's *presence* is still guarded — deleting it
+also removes the drawing that anchors it to the sheet, which `drawings`
+catches.
+
+None of this applies when a library edits the file instead of Excel. Nothing
+recalculates, so there is no cascade and the narrow policy is the right one.
+
 ### Choosing a mode
 
 ```yaml
