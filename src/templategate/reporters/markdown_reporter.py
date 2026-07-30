@@ -23,6 +23,9 @@ def render_markdown(result: CheckResult) -> str:
         f"- Changes: {len(result.changes)} total / "
         f"{len(result.allowed)} allowed / {len(result.violations)} violations",
     ]
+    for role, reason in (result.meta.get("degraded") or {}).items():
+        lines += ["", f"> **The {role} document is damaged:** {_escape(reason)}  ",
+                  "> Only its package parts could be compared."]
     if result.violations:
         lines += [""]
         if result.meta.get("policy_mode") == "review_only":

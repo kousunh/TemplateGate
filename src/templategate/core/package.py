@@ -2,20 +2,35 @@
 
 An .xlsx/.docx is a zip of XML and binary *parts*.  Editing libraries only
 understand a subset of them: openpyxl silently discards charts, pivot tables,
-shapes, embedded objects and the VBA project on save, and python-docx drops
-comments and VBA.  Anything the library cannot model simply vanishes, and no
-amount of inspecting the library's own object graph will reveal it — the part
-is gone from both sides of that view.
+shapes, Excel tables, external links and the VBA project on save, and
+python-docx drops comments and VBA.  Anything the library cannot model simply
+vanishes, and no amount of inspecting the library's own object graph will
+reveal it — the part is gone from both sides of that view.
 
 So this layer never asks openpyxl or python-docx what is in the file.  It
-opens the zip, hashes the parts it cares about, and compares the two
-inventories.  A part that disappeared between baseline and candidate is
-round-trip damage, whether or not any library can parse it.
+opens the zip and takes an inventory of *every* part, default-deny: a part
+nobody recognized still gets hashed and reported, because the parts that are
+not modelled are exactly the ones that go missing.
+
+Three things stop that from crying wolf on a legitimate edit:
+
+* Parts whose content is already compared semantically upstream — worksheet
+  XML, workbook.xml, shared strings, styles, document.xml — are tracked for
+  presence only.  Editing an allowed cell rewrites the sheet part by
+  definition, and the cell-level diff has already said so precisely.
+* Word XML is normalized before hashing (revision ids, proofing marks and
+  insignificant whitespace churn on every save without meaning anything).
+* Drawing parts are reduced to the shapes they hold, because openpyxl injects
+  presentation defaults on every save.
+
+Volatile parts that carry no meaning at all — timestamps, the calc chain,
+printer settings — are excluded outright.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import zipfile
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -26,6 +41,8 @@ from .model import (
     ATTR_CUSTOM_XML,
     ATTR_DRAWINGS,
     ATTR_EMBEDDED,
+    ATTR_LINKS,
+    ATTR_PARTS,
     ATTR_PIVOT_TABLES,
     ATTR_VBA,
     Change,
@@ -43,7 +60,18 @@ CATEGORY_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("drawings", ("xl/drawings/", "word/drawings/")),
 )
 
-# category -> the change attribute a policy addresses it by.
+# Everything the list above did not claim lands here.  This is what makes the
+# inventory default-deny rather than an allowlist.
+FALLBACK_CATEGORY = "parts"
+
+# External relationship targets are compared as their own map: a hyperlink
+# retargeted to another host changes no part content at all.
+LINKS_CATEGORY = "links"
+
+CATEGORIES = tuple(name for name, _ in CATEGORY_PREFIXES) + (
+    FALLBACK_CATEGORY, LINKS_CATEGORY,
+)
+
 CATEGORY_ATTRIBUTES = {
     "vba": ATTR_VBA,
     "charts": ATTR_CHARTS,
@@ -52,27 +80,60 @@ CATEGORY_ATTRIBUTES = {
     "embedded": ATTR_EMBEDDED,
     "custom_xml": ATTR_CUSTOM_XML,
     "drawings": ATTR_DRAWINGS,
+    FALLBACK_CATEGORY: ATTR_PARTS,
+    LINKS_CATEGORY: ATTR_LINKS,
 }
 
-CATEGORIES = tuple(name for name, _ in CATEGORY_PREFIXES)
-
-# Parts that churn on any legitimate save and would otherwise cry wolf:
-# document properties carry timestamps, the formula calc chain is rebuilt,
-# printer settings are opaque binaries, and media is already compared
-# semantically by the images attribute.
+# Parts that churn on any save and mean nothing on their own: document
+# properties carry timestamps, the calc chain is rebuilt from the formulas,
+# printer settings are opaque device blobs, content types are derived from
+# which parts exist (which this module already tracks), and media is compared
+# semantically by the images attribute.  docProps/custom.xml is deliberately
+# NOT here: it holds the values DOCPROPERTY fields display.
 EXCLUDED_PREFIXES = (
-    "docProps/",
+    "docProps/core.xml",
+    "docProps/app.xml",
+    "docProps/thumbnail",
+    "[Content_Types].xml",
     "xl/calcChain.xml",
     "xl/printerSettings/",
     "word/printerSettings/",
     "xl/media/",
     "word/media/",
-    "[Content_Types].xml",
+    # Worksheets are the one part family that legitimately comes and goes, and
+    # both their presence and their contents are already reported by name
+    # ("sheet:Notes", "Notes!B2").  Tracking the files as well would restate
+    # every added or deleted sheet as an opaque internal filename.  A worksheet
+    # part that vanishes without the sheet list noticing makes the workbook
+    # unopenable, which the degraded read in api.py reports from the raw
+    # name list instead.
+    "xl/worksheets/",
 )
 
+# Parts whose *content* is already compared, cell by cell and paragraph by
+# paragraph, by the format-specific snapshot.  Hashing them as well would
+# report every allowed edit twice — once precisely, once as an opaque blob.
+# Their presence is still tracked: losing one outright is real damage.
+PRESENCE_ONLY_PREFIXES = (
+    "xl/workbook.xml",
+    "xl/sharedStrings.xml",
+    "xl/styles.xml",
+    "word/document.xml",
+)
+_PRESENT = "present"
+
 # Relationship files are rewritten wholesale (ids renumbered) whenever a part
-# is touched, so they say nothing useful about content.
+# is touched, so their bytes say nothing — but the external targets inside
+# them do, and those are extracted separately.
 _RELS_SEGMENT = "_rels"
+
+# Word rewrites these on every save without changing the document: revision
+# save ids, proofing error marks, and whitespace between elements.
+_WORD_NOISE = (
+    re.compile(rb'\sw:rsid[A-Za-z]*="[^"]*"'),
+    re.compile(rb"<w:proofErr[^/>]*/>"),
+)
+_BETWEEN_TAGS = re.compile(rb">\s+<")
 
 # Drawing elements worth counting.  A drawing part is summarized by which
 # shapes it holds rather than by its bytes, for two reasons: openpyxl injects
@@ -83,20 +144,38 @@ _RELS_SEGMENT = "_rels"
 # editing library destroys without saying so.
 _SHAPE_TAGS = frozenset({"sp", "graphicFrame", "cxnSp", "grpSp"})
 
+_RELATIONSHIP_TAG = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+
+# Parts that are not hashed as a whole, but whose <extLst> extension blocks
+# are.  An extension list is by construction the part of the XML the base
+# schema does not describe — newer Excel features such as x14 data validation
+# (the modern dropdown), sparklines and slicers all live there, and openpyxl
+# drops the whole block on save while faithfully rewriting everything around
+# it.  Hashing just the extensions catches that without re-reporting the cell
+# edits the rest of the part legitimately carries.
+_EXTENSION_SCANNED_PREFIXES = ("xl/worksheets/", "xl/workbook.xml")
+_EXTENSION_SUFFIX = "#extLst"
+
+
+def _is_rels(name: str) -> bool:
+    return _RELS_SEGMENT in name.split("/")
+
 
 def _is_excluded(name: str) -> bool:
-    if name.endswith("/"):
-        return True
-    if _RELS_SEGMENT in name.split("/"):
-        return True
-    return name.startswith(EXCLUDED_PREFIXES)
+    return name.endswith("/") or name.startswith(EXCLUDED_PREFIXES)
 
 
-def _categorize(name: str) -> str | None:
+def _categorize(name: str) -> str:
     for category, prefixes in CATEGORY_PREFIXES:
         if name.startswith(prefixes):
             return category
-    return None
+    return FALLBACK_CATEGORY
+
+
+def _normalize_word_xml(data: bytes) -> bytes:
+    for pattern in _WORD_NOISE:
+        data = pattern.sub(b"", data)
+    return _BETWEEN_TAGS.sub(b"><", data).strip()
 
 
 def _shape_summary(data: bytes) -> str | None:
@@ -127,35 +206,122 @@ def _shape_summary(data: bytes) -> str | None:
 
 def _digest(category: str, name: str, data: bytes) -> str | None:
     """The comparable fingerprint of a part, or None if it is not worth tracking."""
+    if name.startswith(PRESENCE_ONLY_PREFIXES):
+        return _PRESENT
     if category == "drawings" and name.endswith(".xml"):
         summary = _shape_summary(data)
         if summary == "":
             return None
         if summary is not None:
             return hashlib.sha256(summary.encode("utf-8")).hexdigest()
+    if name.startswith("word/") and name.endswith(".xml"):
+        data = _normalize_word_xml(data)
     return hashlib.sha256(data).hexdigest()
 
 
-def take_package_snapshot(path: str | Path) -> dict[str, dict[str, str]]:
-    """Inventory the package parts of a document, grouped by category."""
-    package: dict[str, dict[str, str]] = {name: {} for name in CATEGORIES}
+def _extension_digest(data: bytes) -> str | None:
+    """Fingerprint the <extLst> blocks of a part, or None if it has none."""
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+    blocks: list[str] = []
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "extLst":
+            continue
+        raw = ElementTree.tostring(element)
+        try:
+            blocks.append(ElementTree.canonicalize(raw.decode("utf-8")))
+        except Exception:  # pragma: no cover - canonicalize is best effort
+            blocks.append(raw.decode("utf-8", "replace"))
+    if not blocks:
+        return None
+    return hashlib.sha256("".join(sorted(blocks)).encode("utf-8")).hexdigest()
+
+
+def _external_targets(data: bytes) -> list[str]:
+    """The external targets declared by one .rels part."""
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return []
+    return [
+        element.get("Target", "")
+        for element in root.iter(_RELATIONSHIP_TAG)
+        if element.get("TargetMode") == "External" and element.get("Target")
+    ]
+
+
+def take_package_snapshot(path: str | Path) -> dict[str, dict]:
+    """Inventory the package parts of a document, grouped by category.
+
+    Relationship ids are deliberately not part of the link map: they are
+    renumbered whenever a part is rewritten, so keying on them would report a
+    change every time nothing happened.  Targets are keyed by URL instead.
+    """
+    package: dict[str, dict] = {name: {} for name in CATEGORIES}
+    links: dict[str, list[str]] = {}
     with zipfile.ZipFile(path) as zf:
         for info in zf.infolist():
             name = info.filename
+            if name.endswith("/"):
+                continue
+            if _is_rels(name):
+                for target in _external_targets(zf.read(name)):
+                    links.setdefault(target, []).append(name)
+                continue
+            data = None
+            if name.startswith(_EXTENSION_SCANNED_PREFIXES):
+                data = zf.read(name)
+                extensions = _extension_digest(data)
+                if extensions is not None:
+                    package[FALLBACK_CATEGORY][name + _EXTENSION_SUFFIX] = extensions
             if _is_excluded(name):
                 continue
+            if data is None:
+                data = zf.read(name)
             category = _categorize(name)
-            if category is None:
-                continue
-            digest = _digest(category, name, zf.read(name))
+            digest = _digest(category, name, data)
             if digest is not None:
                 package[category][name] = digest
+    package[LINKS_CATEGORY] = {url: sorted(set(owners))
+                               for url, owners in sorted(links.items())}
     return package
+
+
+def list_part_names(path: str | Path) -> list[str]:
+    """Every part in the container, unfiltered.
+
+    The curated inventory deliberately leaves parts out; this does not.  It is
+    what a degraded read falls back on, where the goal is to name whatever
+    went missing rather than to keep the report quiet.
+    """
+    with zipfile.ZipFile(path) as zf:
+        return sorted(info.filename for info in zf.infolist()
+                      if not info.filename.endswith("/"))
+
+
+def diff_part_names(base: dict, cand: dict) -> list[Change]:
+    """Report parts that vanished or appeared, by raw name."""
+    b_names = set(base.get("part_names", []))
+    c_names = set(cand.get("part_names", []))
+    changes: list[Change] = []
+    for name in sorted(b_names - c_names):
+        changes.append(Change(f"package#{FALLBACK_CATEGORY}:{name}", ATTR_PARTS,
+                              old="present", new=None,
+                              detail=f"{name} is missing from the candidate"))
+    for name in sorted(c_names - b_names):
+        changes.append(Change(f"package#{FALLBACK_CATEGORY}:{name}", ATTR_PARTS,
+                              old=None, new="present",
+                              detail=f"{name} was added to the candidate"))
+    return changes
 
 
 def _short(digest: str | None) -> str | None:
     """A digest prefix: enough to tell parts apart, short enough to read."""
-    return digest[:12] if digest else digest
+    if digest is None or digest == _PRESENT:
+        return digest
+    return digest[:12]
 
 
 def _location(category: str, name: str) -> str:
@@ -164,6 +330,15 @@ def _location(category: str, name: str) -> str:
     if category == "vba":
         return "vba"
     return f"package#{category}:{name}"
+
+
+def _describe(category: str, name: str, old, new) -> str:
+    what = "external link" if category == LINKS_CATEGORY else f"{category} part"
+    if new is None:
+        return f"{what} removed: {name}"
+    if old is None:
+        return f"{what} added: {name}"
+    return f"{what} modified: {name}"
 
 
 def diff_packages(base: dict, cand: dict) -> list[Change]:
@@ -180,12 +355,15 @@ def diff_packages(base: dict, cand: dict) -> list[Change]:
             new = c_parts.get(name)
             if old == new:
                 continue
-            if new is None:
-                detail = f"{category} part removed: {name}"
-            elif old is None:
-                detail = f"{category} part added: {name}"
-            else:
-                detail = f"{category} part modified: {name}"
+            if category == LINKS_CATEGORY:
+                changes.append(Change(
+                    _location(category, name), attribute,
+                    old="present" if old is not None else None,
+                    new="present" if new is not None else None,
+                    detail=_describe(category, name, old, new),
+                ))
+                continue
             changes.append(Change(_location(category, name), attribute,
-                                  old=_short(old), new=_short(new), detail=detail))
+                                  old=_short(old), new=_short(new),
+                                  detail=_describe(category, name, old, new)))
     return changes

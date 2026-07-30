@@ -35,6 +35,9 @@ ATTR_DRAWINGS = "drawings"
 ATTR_COMMENTS = "comments"
 ATTR_EMBEDDED = "embedded"
 ATTR_CUSTOM_XML = "custom_xml"
+# Every other package part, and the external targets of relationships.
+ATTR_PARTS = "parts"
+ATTR_LINKS = "links"
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"

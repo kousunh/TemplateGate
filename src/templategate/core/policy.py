@@ -177,6 +177,8 @@ structural:
   comments: strict
   embedded: strict         # embedded/OLE objects
   custom_xml: strict
+  parts: strict            # every other package part, including unknown ones
+  links: strict            # external hyperlink and reference targets
 
 semantic:
   mode: "off"              # off | review | gate
@@ -208,6 +210,8 @@ structural:
   comments: strict
   embedded: strict         # embedded/OLE objects
   custom_xml: strict
+  parts: strict            # styles, numbering, footnotes, settings, theme...
+  links: strict            # external hyperlink targets
 
 semantic:
   mode: "off"

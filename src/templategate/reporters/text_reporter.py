@@ -16,6 +16,9 @@ def render_text(result: CheckResult) -> str:
         f"  changes: {len(result.changes)} total, "
         f"{len(result.allowed)} allowed, {len(result.violations)} violations",
     ]
+    for role, reason in (result.meta.get("degraded") or {}).items():
+        lines.append(f"  ! the {role} document is damaged: {reason}")
+        lines.append("    only its package parts could be compared")
     if result.violations:
         lines.append("")
         if result.meta.get("policy_mode") == "review_only":

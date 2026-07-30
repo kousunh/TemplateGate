@@ -8,7 +8,7 @@ from pathlib import Path
 
 from docx import Document
 
-from ..core.package import take_package_snapshot
+from ..core.package import list_part_names, take_package_snapshot
 
 
 def _s(value) -> str:
@@ -114,4 +114,5 @@ def take_snapshot(path: str | Path) -> dict:
         "header_footer": header_footer,
         "images": sorted(images),
         "package": take_package_snapshot(path),
+        "part_names": list_part_names(path),
     }

@@ -8,12 +8,15 @@ the VBA project hash.  Extraction is read-only.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
+from openpyxl.worksheet.worksheet import Worksheet
 
-from ..core.package import take_package_snapshot
+from ..core.package import list_part_names, take_package_snapshot
 
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
@@ -21,8 +24,10 @@ _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 def _color(c) -> tuple | None:
     if c is None:
         return None
-    return (getattr(c, "rgb", None), getattr(c, "theme", None),
-            getattr(c, "tint", None), getattr(c, "indexed", None))
+    return tuple(
+        _plain(getattr(c, name, None))
+        for name in ("rgb", "theme", "tint", "indexed")
+    )
 
 
 def _side(s) -> tuple | None:
@@ -50,15 +55,50 @@ def _format_key(cell) -> tuple | None:
     )
 
 
+def _plain(value):
+    """Reduce a cell value to something comparable and JSON-safe.
+
+    An openpyxl object must never reach the snapshot.  ArrayFormula and
+    DataTableFormula define no __eq__, so two loads of the same untouched file
+    compare unequal and every round-trip reports a phantom change; worse, they
+    are not str, so a formula wearing one would be filed under the `value`
+    attribute and slip past a policy that protects `formula`.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, datetime.timedelta):
+        return value.total_seconds()
+    # Anything unforeseen: describe it by its public attributes, never by
+    # repr(), which would bake in a memory address.
+    fields = getattr(value, "__dict__", None)
+    if fields:
+        return f"{type(value).__name__}" + repr(
+            sorted((k, str(v)) for k, v in fields.items() if not k.startswith("_"))
+        )
+    return f"{type(value).__name__}:{value}"
+
+
+def _formula_of(value):
+    """The canonical formula carried by a cell value, or None."""
+    if isinstance(value, ArrayFormula):
+        return ("array", value.ref, value.text)
+    if isinstance(value, DataTableFormula):
+        return ("data_table",) + tuple(sorted(dict(value).items()))
+    if isinstance(value, str) and value.startswith("="):
+        return value
+    return None
+
+
 def _cells(ws_formula, ws_value) -> dict:
     cells: dict[str, dict] = {}
     for row in ws_formula.iter_rows():
         for cell in row:
-            formula = None
-            if isinstance(cell.value, str) and cell.value.startswith("="):
-                formula = cell.value
+            formula = _formula_of(cell.value)
             fmt = _format_key(cell)
             cached = ws_value[cell.coordinate].value if formula else cell.value
+            cached = _plain(cached)
             if cached is None and formula is None and fmt is None:
                 continue
             cells[cell.coordinate] = {
@@ -140,6 +180,44 @@ def _print_settings(ws) -> dict:
     }
 
 
+_EMPTY_SHEET = {
+    "cells": {},
+    "merges": [],
+    "conditional_formatting": {},
+    "data_validation": {},
+    "images": [],
+    "header_footer": {},
+    "print": {},
+}
+
+
+def _sheet_snapshot(ws, index: int, wb_value) -> dict:
+    """One sheet's contents.
+
+    A workbook may also contain chartsheets, which carry no cell grid at all —
+    asking one for its rows raises AttributeError, so they are recorded by
+    presence and kind only.  A worksheet swapped for a chartsheet still shows
+    up, as a change of kind.
+    """
+    common = {
+        "index": index,
+        "visibility": ws.sheet_state,
+        "kind": "worksheet" if isinstance(ws, Worksheet) else "chartsheet",
+    }
+    if not isinstance(ws, Worksheet):
+        return {**common, **_EMPTY_SHEET}
+    return {
+        **common,
+        "cells": _cells(ws, wb_value[ws.title]),
+        "merges": sorted(str(m) for m in ws.merged_cells.ranges),
+        "conditional_formatting": _conditional_formatting(ws),
+        "data_validation": _data_validation(ws),
+        "images": _images(ws),
+        "header_footer": _header_footer(ws),
+        "print": _print_settings(ws),
+    }
+
+
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     wb_formula = load_workbook(path, data_only=False)
@@ -148,17 +226,7 @@ def take_snapshot(path: str | Path) -> dict:
     sheets: dict[str, dict] = {}
     for index, name in enumerate(wb_formula.sheetnames):
         ws = wb_formula[name]
-        sheets[name] = {
-            "index": index,
-            "visibility": ws.sheet_state,
-            "cells": _cells(ws, wb_value[name]),
-            "merges": sorted(str(m) for m in ws.merged_cells.ranges),
-            "conditional_formatting": _conditional_formatting(ws),
-            "data_validation": _data_validation(ws),
-            "images": _images(ws),
-            "header_footer": _header_footer(ws),
-            "print": _print_settings(ws),
-        }
+        sheets[name] = _sheet_snapshot(ws, index, wb_value)
 
     defined_names = {}
     for name, dn in wb_formula.defined_names.items():
@@ -170,4 +238,5 @@ def take_snapshot(path: str | Path) -> dict:
         "sheets": sheets,
         "defined_names": defined_names,
         "package": take_package_snapshot(path),
+        "part_names": list_part_names(path),
     }

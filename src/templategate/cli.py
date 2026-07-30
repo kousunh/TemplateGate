@@ -1,6 +1,10 @@
 """TemplateGate command-line interface.
 
 Exit codes: 0 = PASS, 1 = FAIL, 2 = execution/configuration error.
+
+A document that opens as a package but has lost a part it still references is
+damage, not an error: it reports the missing parts and exits 1.  Exit 2 is for
+files that are not readable containers at all, and for policy and IO problems.
 """
 
 from __future__ import annotations

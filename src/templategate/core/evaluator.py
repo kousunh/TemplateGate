@@ -20,6 +20,8 @@ from .model import (
     ATTR_DRAWINGS,
     ATTR_EMBEDDED,
     ATTR_IMAGES,
+    ATTR_LINKS,
+    ATTR_PARTS,
     ATTR_PIVOT_TABLES,
     ATTR_SHEET_STRUCTURE,
     ATTR_TABLE,
@@ -43,6 +45,8 @@ _STRUCTURAL_ATTRS = {
     "comments": ATTR_COMMENTS,
     "embedded": ATTR_EMBEDDED,
     "custom_xml": ATTR_CUSTOM_XML,
+    "parts": ATTR_PARTS,
+    "links": ATTR_LINKS,
 }
 
 

@@ -128,6 +128,10 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
     changes: list[Change] = []
 
     if include_structure:
+        if b.get("kind", "worksheet") != c.get("kind", "worksheet"):
+            changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
+                                  old=b.get("kind"), new=c.get("kind"),
+                                  detail="sheet kind changed"))
         if b["index"] != c["index"]:
             changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
                                   old=b["index"], new=c["index"], detail="sheet moved"))
