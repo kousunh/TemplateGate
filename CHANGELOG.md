@@ -60,6 +60,15 @@ Initial release.
 - Excel-style quoting for sheet names containing `'`, `!` or `#`:
   `'Q1!Q4'!A1` addresses cell A1 of the sheet named `Q1!Q4`, which bare
   `Q1!Q4` would otherwise read as cell Q4 of a sheet named `Q1`.
+- Word attribute `markup`, a residual backstop comparing whatever is left in
+  a block once every modelled attribute is accounted for. It needs no rule
+  per feature, so it catches an unmodelled character style, a deleted
+  footnote reference, a removed comment anchor, or a legacy form field
+  disabled. Markup is held as a set of fragments, so re-flowing the same
+  content across a different number of runs — what an allowed text edit
+  routinely does — is not reported as a change.
+- `sheet_settings` now covers `ignored_errors`, so suppressing Excel's
+  warning triangles is visible.
 
 ### Changed
 
@@ -73,6 +82,15 @@ Initial release.
   than "the format changed". Where one edit shifts everything after it, the
   text and Markdown reports collapse the knock-on changes into one line while
   the JSON report keeps every change, related by a new `group` field.
+- A package whose member names are duplicated or which escape the package
+  root is refused outright (exit 2) rather than compared, because different
+  readers would open different documents from it. Damage remains a FAIL
+  (exit 1); exit 2 now means the file could not be read unambiguously.
+
+### Fixed
+
+- A sheet with cells in far corners of the grid no longer hangs the check;
+  cost tracks the number of populated cells rather than the addressed range.
 - Optional semantic review (`off` / `review` / `gate`) through a
   user-supplied command; no vendor is pinned and `off` performs no network
   calls.

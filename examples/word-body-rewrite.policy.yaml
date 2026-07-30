@@ -16,7 +16,10 @@ protect:
                  table, field, bookmark, content_control,
                  # Rewriting the text is allowed; smuggling it in as a tracked
                  # change, or reordering the document, is not.
-                 revision, moved]
+                 revision, moved,
+                 # The backstop: anything in a paragraph that none of the
+                 # above accounts for, such as a dropped footnote reference.
+                 markup]
 
 structural:
   images: strict

@@ -78,10 +78,15 @@ templategate check \
 Exit codes: `0` = PASS, `1` = FAIL, `2` = execution error.
 
 A candidate that still opens as a package but has lost parts it referenced is
-**damaged, not unreadable** — that is a FAIL with the missing parts named, not
-a tool error. Exit 2 is reserved for a file that will not open at all, and for
-configuration mistakes. Neither `review_only` mode nor `structural: ignore`
-can bless a document that cannot be opened.
+**damaged, not unreadable** — that is a FAIL (exit 1) with the missing parts
+named, not a tool error.
+
+Exit 2 means the file could not be read unambiguously: it will not open at
+all, or its package is ambiguous. A zip holding two copies of the same part is
+refused rather than guessed at, because different readers would open different
+documents from it. Configuration mistakes are exit 2 as well. Neither
+`review_only` mode nor `structural: ignore` can bless a document that cannot
+be read.
 
 A policy looks like this:
 
@@ -122,11 +127,14 @@ stale. The ones worth knowing about:
   external targets of relationships, which is what catches a hyperlink
   repointed to a new URL while its display text is untouched.
 - **Excel** — `layout` (hidden rows and columns, and their sizes),
-  `protection` (sheet and workbook locking), `sheet_settings` (including a
-  workbook switched to manual calculation).
+  `protection` (sheet and workbook locking), `sheet_settings` (a workbook
+  switched to manual calculation, or Excel's warning triangles suppressed).
 - **Word** — `paragraph_format`, `field`, `bookmark`, `content_control`,
   `revision` (tracked changes), and `moved` for a block whose content survived
-  but whose position did not.
+  but whose position did not. `markup` is the backstop: anything inside a
+  block that no other attribute accounts for, which is what catches an
+  unmodelled character style, a deleted footnote reference, a removed comment
+  anchor, or a form field quietly disabled.
 
 The VBA project keeps its own `vba` selector and attribute rather than living
 under `package#`.

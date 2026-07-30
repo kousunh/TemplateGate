@@ -59,6 +59,12 @@ this workflow exactly.
      A FAIL can also mean the candidate is *damaged*: it still opens as a
      package but has lost parts it referenced. That is a failed check, not a
      tool error, and it is not repairable by further editing.
+
+     A `markup` violation means something structural changed inside that
+     block that is not its text and not its formatting — a footnote
+     reference or comment anchor that got dropped, a form field disabled, a
+     character style removed. Retyping the text will not fix it, because the
+     text was never the problem. Restart from the baseline.
    - exit code `2`: an execution error (bad path, invalid policy, or a file
      that will not open at all). Fix the invocation, not the document.
 
@@ -84,8 +90,9 @@ formatting, fields, bookmarks, content controls, text boxes (`sdt<N>` /
 `textbox<N>`), nested tables, and every package part in the file.
 
 Editing through tracked changes hides nothing: a tracked insertion is text on
-the page, so it is reported as a `text` change and a `revision` change. There
-is no way to make an edit that the report will not mention.
+the page, so it is reported as a `text` change and a `revision` change.
+Anything in a block that no named attribute covers is still compared, under
+`markup`. There is no way to make an edit that the report will not mention.
 
 ## Hard rules
 
