@@ -22,13 +22,33 @@ from ..core.package import list_part_names, take_package_snapshot
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
 
 
-def _color(c) -> tuple | None:
+def _scalar(value):
+    """A colour component only if it is a real value.
+
+    openpyxl leaves unset descriptors on the object, and stringifying one
+    produces noise like "Integer[('name', 'theme')]" that then shows up in
+    every colour diff.  Anything that is not a plain value is simply not set.
+    """
+    if isinstance(value, bool) or isinstance(value, (str, int, float)):
+        return value
+    return None
+
+
+def _color(c) -> str | None:
+    """A colour as one readable token, so a diff reads FF000000 -> FFFFFFFF."""
     if c is None:
         return None
-    return tuple(
-        _plain(getattr(c, name, None))
-        for name in ("rgb", "theme", "tint", "indexed")
-    )
+    rgb = _scalar(getattr(c, "rgb", None))
+    if rgb is not None:
+        return str(rgb)
+    theme = _scalar(getattr(c, "theme", None))
+    if theme is not None:
+        tint = _scalar(getattr(c, "tint", None)) or 0
+        return f"theme{theme}" if not tint else f"theme{theme}/tint{tint}"
+    indexed = _scalar(getattr(c, "indexed", None))
+    if indexed is not None:
+        return f"indexed{indexed}"
+    return None
 
 
 def _side(s) -> tuple | None:
@@ -47,31 +67,43 @@ def _format_key(cell) -> tuple | None:
     if not cell.has_style:
         return None
     f, fill, b, a = cell.font, cell.fill, cell.border, cell.alignment
-    return (
-        ("font.name", _plain(f.name)),
-        ("font.size", _plain(f.size)),
-        ("font.bold", bool(f.bold)),
-        ("font.italic", bool(f.italic)),
-        ("font.underline", _plain(f.underline)),
-        ("font.strike", bool(f.strike)),
-        ("font.color", _color(f.color)),
-        ("fill.pattern", _plain(fill.patternType)),
-        ("fill.foreground", _color(getattr(fill, "fgColor", None))),
-        ("fill.background", _color(getattr(fill, "bgColor", None))),
-        ("border.left", _side(b.left)),
-        ("border.right", _side(b.right)),
-        ("border.top", _side(b.top)),
-        ("border.bottom", _side(b.bottom)),
-        ("border.diagonal", _side(b.diagonal)),
-        ("align.horizontal", _plain(a.horizontal)),
-        ("align.vertical", _plain(a.vertical)),
-        ("align.wrap_text", bool(a.wrap_text)),
-        ("align.rotation", _plain(a.text_rotation)),
-        ("align.indent", _plain(a.indent)),
-        ("numfmt", _plain(cell.number_format)),
-        ("protect.locked", _plain(cell.protection.locked)),
-        ("protect.hidden", _plain(cell.protection.hidden)),
-    )
+    fields: dict[str, object] = {}
+
+    def record(name, value, *, default=None) -> None:
+        # Only what this cell actually says.  A style carries a value for
+        # every property whether or not it means anything, and listing all of
+        # them turns "this cell went bold" into twenty rows of noise.
+        if value is not None and value != default:
+            fields[name] = value
+
+    record("font.name", _plain(f.name))
+    record("font.size", _plain(f.size))
+    record("font.bold", bool(f.bold), default=False)
+    record("font.italic", bool(f.italic), default=False)
+    record("font.underline", _plain(f.underline))
+    record("font.strike", bool(f.strike), default=False)
+    record("font.color", _color(f.color))
+
+    pattern = _plain(fill.patternType)
+    record("fill.pattern", pattern)
+    if pattern:  # a fill with no pattern paints nothing, whatever its colours
+        record("fill.foreground", _color(getattr(fill, "fgColor", None)))
+        record("fill.background", _color(getattr(fill, "bgColor", None)))
+
+    for edge in ("left", "right", "top", "bottom", "diagonal"):
+        record(f"border.{edge}", _side(getattr(b, edge, None)))
+
+    record("align.horizontal", _plain(a.horizontal))
+    record("align.vertical", _plain(a.vertical))
+    record("align.wrap_text", bool(a.wrap_text), default=False)
+    record("align.rotation", _plain(a.text_rotation), default=0)
+    record("align.indent", _plain(a.indent), default=0)
+    record("numfmt", _plain(cell.number_format), default="General")
+    # Locked is the default and only bites once the sheet is protected, which
+    # is compared separately; an *unlocked* cell is the notable one.
+    record("protect.locked", _plain(cell.protection.locked), default=True)
+    record("protect.hidden", _plain(cell.protection.hidden), default=False)
+    return tuple(sorted(fields.items()))
 
 
 def _plain(value):
@@ -133,24 +165,43 @@ def _formula_of(value):
     return None
 
 
+def _populated(ws):
+    """The cells a sheet actually has, in a stable order.
+
+    ``iter_rows`` walks the sheet's *declared* dimension, so a single value
+    parked in XFD100000 makes it materialize a billion empty cells and the
+    gate appears to hang.  openpyxl already keeps only the cells that exist,
+    keyed by (row, column); reading that directly makes the cost track the
+    content instead of the geometry.
+    """
+    grid = getattr(ws, "_cells", None)
+    if grid is None:  # pragma: no cover - every Worksheet has one
+        return [cell for row in ws.iter_rows() for cell in row]
+    return [grid[key] for key in sorted(grid)]
+
+
 def _cells(ws_formula, ws_value) -> dict:
     cells: dict[str, dict] = {}
-    for row in ws_formula.iter_rows():
-        for cell in row:
-            formula = _formula_of(cell.value)
-            runs = _rich_runs(cell.value)
-            fmt = _format_key(cell)
-            if runs is not None:
-                fmt = (fmt or ()) + (("runs", runs),)
-            cached = ws_value[cell.coordinate].value if formula else cell.value
-            cached = _plain(cached)
-            if cached is None and formula is None and fmt is None:
-                continue
-            cells[cell.coordinate] = {
-                "value": cached,
-                "formula": formula,
-                "format": fmt,
-            }
+    value_grid = getattr(ws_value, "_cells", {})
+    for cell in _populated(ws_formula):
+        formula = _formula_of(cell.value)
+        runs = _rich_runs(cell.value)
+        fmt = _format_key(cell)
+        if runs is not None:
+            fmt = (fmt or ()) + (("runs", runs),)
+        if formula:
+            cached_cell = value_grid.get((cell.row, cell.column))
+            cached = cached_cell.value if cached_cell is not None else None
+        else:
+            cached = cell.value
+        cached = _plain(cached)
+        if cached is None and formula is None and fmt is None:
+            continue
+        cells[cell.coordinate] = {
+            "value": cached,
+            "formula": formula,
+            "format": fmt,
+        }
     return cells
 
 
@@ -309,7 +360,8 @@ _EMPTY_SHEET = {
 }
 
 
-def _sheet_snapshot(ws, index: int, wb_value) -> dict:
+def _sheet_snapshot(ws, index: int, wb_value, *,
+                    ignored_errors: str | None = None) -> dict:
     """One sheet's contents.
 
     A workbook may also contain chartsheets, which carry no cell grid at all —
@@ -334,7 +386,7 @@ def _sheet_snapshot(ws, index: int, wb_value) -> dict:
         "header_footer": _header_footer(ws),
         "print": _print_settings(ws),
         "protection": _protection(ws),
-        "settings": _sheet_settings(ws),
+        "settings": _sheet_settings(ws) + (("ignored_errors", ignored_errors),),
         "layout": _layout(ws),
         # Sheet-scoped names are a separate namespace from the workbook's:
         # two sheets may each define "Rates" pointing somewhere different.
@@ -343,15 +395,68 @@ def _sheet_snapshot(ws, index: int, wb_value) -> dict:
     }
 
 
+_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_DOC_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def _ignored_errors(path: Path) -> dict[str, str]:
+    """Per sheet, the cell errors Excel has been told not to flag.
+
+    Suppressing the warning triangles is how a broken formula or a number
+    stored as text stops looking broken, and openpyxl does not model the
+    element at all — so it is read from the sheet part directly.
+    """
+    import xml.etree.ElementTree as ElementTree
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            if "xl/workbook.xml" not in names:
+                return {}
+            workbook = ElementTree.fromstring(zf.read("xl/workbook.xml"))
+            targets = {}
+            if "xl/_rels/workbook.xml.rels" in names:
+                rels = ElementTree.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+                for relationship in rels.iter(_PKG_REL_NS + "Relationship"):
+                    targets[relationship.get("Id")] = relationship.get("Target", "")
+
+            found: dict[str, str] = {}
+            for sheet in workbook.iter(_MAIN_NS + "sheet"):
+                target = targets.get(sheet.get(_DOC_REL_NS + "id"), "")
+                if not target:
+                    continue
+                # Targets come both absolute ("/xl/worksheets/sheet1.xml")
+                # and relative to the workbook part ("worksheets/sheet1.xml").
+                part = target.lstrip("/")
+                if not part.startswith("xl/"):
+                    part = "xl/" + part
+                if part not in names:
+                    continue
+                root = ElementTree.fromstring(zf.read(part))
+                blocks = [ElementTree.tostring(element, encoding="unicode")
+                          for element in root.iter(_MAIN_NS + "ignoredErrors")]
+                if blocks:
+                    found[sheet.get("name", "")] = hashlib.sha256(
+                        "".join(blocks).encode("utf-8")).hexdigest()[:12]
+            return found
+    except Exception:
+        # Never let an optional extra stop the rest of the snapshot.
+        return {}
+
+
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     wb_formula = load_workbook(path, data_only=False, rich_text=True)
     wb_value = load_workbook(path, data_only=True)
 
+    suppressed = _ignored_errors(path)
     sheets: dict[str, dict] = {}
     for index, name in enumerate(wb_formula.sheetnames):
         ws = wb_formula[name]
-        sheets[name] = _sheet_snapshot(ws, index, wb_value)
+        sheets[name] = _sheet_snapshot(ws, index, wb_value,
+                                       ignored_errors=suppressed.get(name))
 
     defined_names = {}
     for name, dn in wb_formula.defined_names.items():

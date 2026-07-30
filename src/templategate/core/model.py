@@ -55,6 +55,9 @@ ATTR_REVISION = "revision"
 ATTR_CONTENT_CONTROL = "content_control"
 # A block whose content survived but whose position did not.
 ATTR_MOVED = "moved"
+# Markup in a block that no other attribute accounts for.  The backstop that
+# keeps an unmodelled feature from being an invisible one.
+ATTR_MARKUP = "markup"
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"

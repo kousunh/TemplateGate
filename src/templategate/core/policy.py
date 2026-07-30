@@ -204,7 +204,8 @@ protect:
   # are addressed as sdt<N> / textbox<N>, so they are protected by "*" here.
   - selector: "*"
     attributes: [style, format, paragraph_format, section, header_footer,
-                 field, bookmark, revision, content_control, table, moved]
+                 field, bookmark, revision, content_control, table, moved,
+                 markup]
 
 structural:
   images: strict

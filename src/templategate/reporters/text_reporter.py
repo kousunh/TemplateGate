@@ -46,10 +46,10 @@ def render_text(result: CheckResult) -> str:
                 first, last = members[0].change, members[-1].change
                 span = (first.location if first.location == last.location
                         else f"{first.location}..{last.location}")
-                lines.append(f"  [{members[0].severity}] {span}: "
-                             f"content shifted because {group}")
-                lines.append(f"      {len(members)} knock-on changes collapsed; "
-                             "the JSON report lists each one")
+                lines.append(
+                    f"  [{members[0].severity}] {span}: content shifted because "
+                    f"{group} — {len(members)} knock-on changes collapsed; "
+                    "the JSON report lists each one")
                 continue
             v = members[0]
             lines.append(f"  [{v.severity}] {v.change.location} ({v.change.attribute}): {v.message}")

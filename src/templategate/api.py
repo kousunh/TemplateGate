@@ -27,6 +27,14 @@ def detect_target(path: str | Path) -> str:
 
 def snapshot(path: str | Path) -> dict:
     target = detect_target(path)
+    from .core.package import package_problem
+
+    # An ambiguous container is refused outright rather than degraded: there
+    # is no "best effort" reading of a file whose contents depend on which
+    # reader opens it.
+    problem = package_problem(path)
+    if problem is not None:
+        raise DocumentError(f"cannot read {path}: {problem}")
     if target == "excel":
         from .excel.snapshot import take_snapshot
     else:

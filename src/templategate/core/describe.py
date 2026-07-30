@@ -38,14 +38,14 @@ def as_mapping(value: Any) -> dict[str, Any]:
 def field_delta(old: Any, new: Any) -> dict[str, tuple[Any, Any]]:
     """Which named fields differ, and how."""
     old_map, new_map = as_mapping(old), as_mapping(new)
-    missing = object()
     delta: dict[str, tuple[Any, Any]] = {}
     for name in sorted(old_map.keys() | new_map.keys()):
-        before = old_map.get(name, missing)
-        after = new_map.get(name, missing)
+        # Absent and explicitly-None mean the same thing: not set.  Treating
+        # them as different is what made a cell that merely gained a style
+        # report twenty rows of "none -> none".
+        before, after = old_map.get(name), new_map.get(name)
         if before != after:
-            delta[name] = (None if before is missing else before,
-                           None if after is missing else after)
+            delta[name] = (before, after)
     return delta
 
 

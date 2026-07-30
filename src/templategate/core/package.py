@@ -30,6 +30,7 @@ printer settings — are excluded outright.
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 import re
 import zipfile
 import xml.etree.ElementTree as ElementTree
@@ -287,6 +288,50 @@ def take_package_snapshot(path: str | Path) -> dict[str, dict]:
     package[LINKS_CATEGORY] = {url: sorted(set(owners))
                                for url, owners in sorted(links.items())}
     return package
+
+
+def _escapes_root(name: str) -> str | None:
+    """Why a part name does not stay inside the package, or None."""
+    unified = name.replace("\\", "/")
+    if unified.startswith("/"):
+        return "absolute path"
+    if len(unified) > 1 and unified[1] == ":":
+        return "drive letter"
+    if any(segment == ".." for segment in unified.split("/")):
+        return "parent-directory segment"
+    return None
+
+
+def package_problem(path: str | Path) -> str | None:
+    """Why this container cannot be compared at all, or None.
+
+    A zip may legally hold two members with the same name, and readers do not
+    agree about which one wins — Excel and Word may open a different document
+    than the one the gate inspected.  A file like that cannot be checked, only
+    refused; guessing would mean signing off on a document nobody can pin down.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = [info.filename for info in zf.infolist()
+                     if not info.filename.endswith("/")]
+    except Exception:
+        return None  # not a readable container: reported elsewhere
+
+    counts = Counter(names)
+    duplicates = sorted(name for name, count in counts.items() if count > 1)
+    if duplicates:
+        first = duplicates[0]
+        extra = (f" (and {len(duplicates) - 1} other duplicated parts)"
+                 if len(duplicates) > 1 else "")
+        return (f"package contains {counts[first]} copies of {first}{extra}; "
+                "different readers may open different documents")
+
+    for name in names:
+        reason = _escapes_root(name)
+        if reason is not None:
+            return (f"package contains a part outside the package root "
+                    f"({reason}): {name}")
+    return None
 
 
 def list_part_names(path: str | Path) -> list[str]:

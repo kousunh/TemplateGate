@@ -21,6 +21,7 @@ from ..core.model import (
     ATTR_FORMAT,
     ATTR_HEADER_FOOTER,
     ATTR_IMAGES,
+    ATTR_MARKUP,
     ATTR_MOVED,
     ATTR_PARAGRAPH_FORMAT,
     ATTR_REVISION,
@@ -68,6 +69,15 @@ def _break_detail(old, new) -> str:
     return ", ".join(parts) or "breaks changed"
 
 
+def _markup_text(mine, theirs) -> str | None:
+    """The residual fragments only this side has, briefly."""
+    unique = [fragment for fragment in (mine or ()) if fragment not in (theirs or ())]
+    if not unique:
+        return None
+    shown = "; ".join(fragment[:80] for fragment in unique[:2])
+    return shown + (f" (+{len(unique) - 2} more)" if len(unique) > 2 else "")
+
+
 def _paragraph_attrs(loc: str, old: dict, new: dict) -> list[Change]:
     """Every comparable property of one aligned pair of blocks."""
     changes: list[Change] = []
@@ -107,6 +117,11 @@ def _paragraph_attrs(loc: str, old: dict, new: dict) -> list[Change]:
         changes.append(Change(loc, ATTR_REVISION, old=old.get("revisions"),
                               new=new.get("revisions"),
                               detail="tracked-change markup changed"))
+    if old.get("markup") != new.get("markup"):
+        changes.append(Change(loc, ATTR_MARKUP,
+                              old=_markup_text(old.get("markup"), new.get("markup")),
+                              new=_markup_text(new.get("markup"), old.get("markup")),
+                              detail="markup changed that no other check covers"))
     if old.get("control") != new.get("control"):
         changes.append(Change(loc, ATTR_CONTENT_CONTROL, old=old.get("control"),
                               new=new.get("control"),
@@ -134,6 +149,7 @@ def _table_attrs(loc: str, old: dict, new: dict) -> list[Change]:
                               detail="table dimensions changed"))
     o_fmts, n_fmts = old.get("cell_formats", []), new.get("cell_formats", [])
     o_geom, n_geom = old.get("cell_geometry", []), new.get("cell_geometry", [])
+    o_mark, n_mark = old.get("cell_markup", []), new.get("cell_markup", [])
 
     def at(grid, r, c):
         return grid[r][c] if r < len(grid) and c < len(grid[r]) else None
@@ -152,6 +168,12 @@ def _table_attrs(loc: str, old: dict, new: dict) -> list[Change]:
                                       old=old_fields, new=new_fields,
                                       detail=describe_delta(cell_delta,
                                                             "run formatting changed")))
+            o_markup, n_markup = at(o_mark, r, c), at(n_mark, r, c)
+            if o_markup != n_markup:
+                changes.append(Change(cell_loc, ATTR_MARKUP,
+                                      old=_markup_text(o_markup, n_markup),
+                                      new=_markup_text(n_markup, o_markup),
+                                      detail="markup changed that no other check covers"))
             geometry_delta = field_delta(at(o_geom, r, c), at(n_geom, r, c))
             if geometry_delta:
                 old_fields, new_fields = delta_values(geometry_delta)

@@ -38,6 +38,7 @@ core/package.py).
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 from openpyxl.utils import range_boundaries
@@ -80,6 +81,17 @@ def _bounds(ref: str) -> tuple[int, int, int, int] | None:
     )
 
 
+def normalize(text: str) -> str:
+    """Compose a name the one way, so two spellings of it are one name.
+
+    "計画表" typed into a policy and "計画表" stored in the workbook can be
+    different code point sequences (NFC vs NFD) that render identically.  A
+    protect rule that silently matches nothing is worse than no rule at all,
+    so both sides are composed before they are compared.
+    """
+    return unicodedata.normalize("NFC", text)
+
+
 def needs_quoting(sheet: str) -> bool:
     """Whether a sheet name would be ambiguous written bare."""
     return any(character in sheet for character in "'!#") or sheet != sheet.strip()
@@ -93,6 +105,7 @@ def quote_sheet(sheet: str) -> str:
     different things that look the same, so the one that would otherwise be
     misread gets quoted.
     """
+    sheet = normalize(sheet)
     if not needs_quoting(sheet):
         return sheet
     return "'" + sheet.replace("'", "''") + "'"
@@ -161,7 +174,8 @@ def _range_contains(outer: str, inner: str) -> bool:
 
 
 def match_selector(selector: str, location: str) -> bool:
-    selector = selector.strip()
+    selector = normalize(selector.strip())
+    location = normalize(location)
     if selector == "*":
         return True
 

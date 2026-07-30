@@ -277,6 +277,124 @@ def revision_marks(element) -> tuple[int, int]:
     return (inserted, deleted)
 
 
+# --- residual markup ----------------------------------------------------
+#
+# Everything above models a chosen list of features, which means anything not
+# on the list is invisible — and the list will always be incomplete, because
+# WordprocessingML is larger than any list.  A character style, a
+# right-to-left mark, a footnote reference, a comment anchor, a legacy form
+# field: each was a separate hole.
+#
+# So the block is also hashed with everything already modelled taken *out*.
+# What is left is by definition the markup nothing else is watching, and it
+# is compared as its own attribute.  New holes close themselves.
+
+# Removed because another attribute already reports them: text, tabs and
+# breaks are `text`/`paragraph_format`, bookmarks are `bookmark`.  Proofing
+# marks and rendered-page hints are noise Word rewrites on every save.
+_MODELLED_ELEMENTS = frozenset({
+    "t", "delText", "instrText", "tab", "br", "cr", "noBreakHyphen",
+    "bookmarkStart", "bookmarkEnd", "proofErr", "lastRenderedPageBreak",
+})
+# Wrappers whose own identity is modelled (revisions) or lives elsewhere
+# (hyperlink targets are compared as package links).  Their children still
+# count, so the wrapper is dissolved rather than dropped.
+_UNWRAPPED_ELEMENTS = frozenset({
+    "ins", "del", "hyperlink", "smartTag", "moveFrom", "moveTo",
+})
+_MODELLED_RUN_PROPERTIES = frozenset(_RUN_PROPERTIES) | {
+    "sz", "szCs", "color", "u", "highlight", "spacing", "rFonts", "shd",
+}
+_MODELLED_PARAGRAPH_PROPERTIES = frozenset(_PARAGRAPH_FLAGS) | {
+    "pStyle", "jc", "ind", "spacing", "tabs", "numPr", "framePr",
+}
+# Structural containers, which mean nothing once emptied of modelled content.
+_COLLAPSIBLE = frozenset({"r", "p", "rPr", "pPr", "sdtContent", "tc", "tr", "tbl"})
+
+
+_RELATIONSHIP_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+
+def _significant_attributes(element) -> tuple:
+    """An element's attributes, minus the internal handles.
+
+    Relationship ids are renumbered whenever a part is rewritten and say
+    nothing on their own — what they point at is compared as package links,
+    and picture content is compared as images.  Keeping them would make
+    swapping one image for another report twice.
+    """
+    tag = _tag(element)
+    kept = []
+    for name, value in element.attrib.items():
+        local = name.rsplit("}", 1)[-1]
+        if local.startswith("rsid") or name.startswith(_RELATIONSHIP_NS):
+            continue
+        # Non-visual properties: an internal handle plus the file the picture
+        # came from.  Both change when a picture is swapped, which `images`
+        # already reports by content.
+        if tag in ("docPr", "cNvPr") and local in ("id", "name", "descr"):
+            continue
+        kept.append((local, value))
+    return tuple(sorted(kept))
+
+
+def _residual_node(element, *, in_run_properties: bool, in_paragraph_properties: bool):
+    """One element reduced to what nothing else models, or None if that is nothing."""
+    children = []
+    for child in element:
+        tag = _tag(child)
+        if tag in _OPAQUE or tag in _MODELLED_ELEMENTS:
+            continue
+        if in_run_properties and tag in _MODELLED_RUN_PROPERTIES:
+            continue
+        if in_paragraph_properties and tag in _MODELLED_PARAGRAPH_PROPERTIES:
+            continue
+        if tag in _UNWRAPPED_ELEMENTS:
+            children.extend(_residual_children(child))
+            continue
+        node = _residual_node(child, in_run_properties=(tag == "rPr"),
+                              in_paragraph_properties=(tag == "pPr"))
+        if node is not None:
+            children.append(node)
+    attributes = _significant_attributes(element)
+    tag = _tag(element)
+    # A container with nothing left in it carries no meaning of its own, and
+    # dropping it is what makes re-splitting the same text across a different
+    # number of runs a non-event.  Everything else is kept even when empty:
+    # <w:rtl/> and <w:vanish/> say everything they have to say by existing.
+    if tag in _COLLAPSIBLE and not attributes and not children:
+        return None
+    return (tag, attributes, tuple(children))
+
+
+def _residual_children(element) -> list:
+    nodes = []
+    for child in element:
+        tag = _tag(child)
+        if tag in _OPAQUE or tag in _MODELLED_ELEMENTS:
+            continue
+        if tag in _UNWRAPPED_ELEMENTS:
+            nodes.extend(_residual_children(child))
+            continue
+        node = _residual_node(child, in_run_properties=(tag == "rPr"),
+                              in_paragraph_properties=(tag == "pPr"))
+        if node is not None:
+            nodes.append(node)
+    return nodes
+
+
+def residual_markup(element) -> tuple:
+    """The markup of a block that no other attribute accounts for.
+
+    Held as a *set* of fragments rather than a sequence, for the same reason
+    run formats are: re-flowing the same content across a different number of
+    runs is not a change, and an allowed text edit routinely does exactly
+    that.  A run that carries nothing but text reduces to nothing at all and
+    drops out, so rewriting a paragraph reports `text` and only `text`.
+    """
+    return tuple(sorted({repr(node) for node in _residual_children(element)}))
+
+
 def block_of(element, style_names: dict[str, str]) -> dict:
     """The comparable content of one paragraph-like block."""
     properties = element.find(W + "pPr")
@@ -290,6 +408,7 @@ def block_of(element, style_names: dict[str, str]) -> dict:
         "bookmarks": bookmarks(element),
         "revisions": revision_marks(element),
         "breaks": breaks(element),
+        "markup": residual_markup(element),
     }
 
 
@@ -389,6 +508,7 @@ def table_of(table, location: str, blocks: dict, counters: dict,
     rows: list[list[str]] = []
     cell_formats: list[list] = []
     cell_geometries: list[list] = []
+    cell_markup: list[list] = []
     table_properties = table.find(W + "tblPr")
     style_id = (_val(table_properties.find(W + "tblStyle"))
                 if table_properties is not None else None)
@@ -398,6 +518,7 @@ def table_of(table, location: str, blocks: dict, counters: dict,
         rows.append([displayed_text(cell) for cell in cells])
         cell_formats.append([_run_formats(cell) for cell in cells])
         cell_geometries.append([cell_geometry(cell) for cell in cells])
+        cell_markup.append([residual_markup(cell) for cell in cells])
         for cell_index, cell in enumerate(cells, start=1):
             cell_location = f"{location}!r{row_index}c{cell_index}"
             _collect_containers(cell, blocks, counters, styles)
@@ -407,6 +528,7 @@ def table_of(table, location: str, blocks: dict, counters: dict,
         "rows": rows,
         "cell_formats": cell_formats,
         "cell_geometry": cell_geometries,
+        "cell_markup": cell_markup,
         "geometry": table_geometry(table),
     }
 
