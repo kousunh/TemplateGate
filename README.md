@@ -425,6 +425,14 @@ changes into a single line — `p4..p11: content shifted because 1 paragraph
 removed at p3` — while the JSON report always keeps every individual change,
 tied together by a `group` field.
 
+Add `--lang ja` to `check` or `diff` (or set `TEMPLATEGATE_LANG=ja` once for
+a whole job) to read the text and Markdown reports in Japanese, in the
+register of README.ja.md — plain 事務文書 です・ます, addressed to whoever
+decides if the document may ship. The flag beats the environment variable, so
+one run stays readable to somebody else without unsetting a variable the rest
+of the job depends on. The JSON report never moves: agents and CI parse it as
+a contract, in English, whatever `--lang` says.
+
 Other commands:
 
 ```bash

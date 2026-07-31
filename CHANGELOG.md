@@ -79,6 +79,11 @@ Initial release.
   routinely does — is not reported as a change.
 - `sheet_settings` now covers `ignored_errors`, so suppressing Excel's
   warning triangles is visible.
+- `--lang ja` on `check` and `diff` (or `TEMPLATEGATE_LANG=ja` set once for a
+  whole job), for text and Markdown reports in Japanese — the register of
+  README.ja.md, for the reader deciding whether a document may ship. The flag
+  wins over the environment variable. The JSON report is unaffected by
+  `--lang`: it stays English, since agents and CI parse it as a contract.
 
 ### Changed
 
