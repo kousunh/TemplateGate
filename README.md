@@ -83,6 +83,7 @@ Pillow, and PyYAML.
 
 ```bash
 # 1. Generate a starter policy and edit it
+#    (already have an example edit? `templategate suggest` drafts one from it)
 templategate init --target excel
 
 # 2. Let your agent edit a COPY of the document
@@ -162,6 +163,47 @@ Every change is listed with the exact location and attribute name a policy
 rule would use. Allow the ones that were the point of the edit, and leave
 everything else to default deny. Running `diff` on a *legitimate* edit is also
 how you find out what your editing tool damages on the way past.
+
+### Or have it draft the policy for you
+
+Reading a diff and deciding which lines belong in a policy is the part that
+takes experience. `suggest` does that triage for you. Give it a baseline and
+an edited copy **you have already looked at and are happy with**, and it
+writes a commented policy:
+
+```bash
+templategate suggest \
+  --baseline quote.xlsx \
+  --candidate quote.edited.xlsx \
+  --output quote.policy.yaml
+```
+
+It sorts every difference into three kinds, and the difference between them is
+the whole point:
+
+- **What the edit did** — the cells and paragraphs whose contents changed.
+  Allowed, with tight selectors and a note of what was observed. Neighbouring
+  cells collapse into one range, so you get `見積書!D10:D12` rather than three
+  rules nobody will read.
+- **What the save did** — cached formula results, chart caches, a column width
+  read back, a default font. Allowed too, each with a comment explaining why
+  it is harmless. This is the collateral described above, recognised for you.
+- **What neither explains** — a formula replaced by a number, an image gone,
+  a sheet removed, a package part dropped. **Never allowed**, no matter that
+  the sample edit did it. These are listed at the top of the draft for you to
+  decide on, one by one.
+
+That last rule has a consequence worth stating plainly: **if the edit you drew
+the draft from contained real damage, the draft will not pass it.** Run it on
+an edit where a formula was overwritten and the header says so — `見積書!D16:
+formula replaced by a hardcoded value (=D14+D15 -> 1430000)` — and the policy
+refuses to bless it. A draft that quietly allowed that would be worse than no
+draft at all.
+
+The output is a starting point, not a finished policy. Read it, delete what
+you did not mean to permit, and pin it yourself. To grow a policy you already
+have instead of starting over, pass it with `--policy` and the additions
+arrive commented out, for you to accept one at a time.
 
 ### Editing in real Excel
 

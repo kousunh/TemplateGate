@@ -16,6 +16,16 @@ Initial release.
 - `templategate check` — compare a baseline and a candidate document against a
   trusted policy. Exit codes: `0` PASS, `1` FAIL, `2` execution error.
 - `templategate diff`, `templategate snapshot`, and `templategate init`.
+- `templategate suggest` — draft a commented policy from one reviewed edit.
+  It sorts the differences into what the edit changed (allowed with tight
+  selectors, contiguous cells merged into ranges), what the save produced
+  (cached formula results, chart caches, a column width read back, a default
+  font — allowed, each with the mechanism explained), and what neither
+  accounts for (a replaced formula, a removed image, a dropped package part).
+  The third group is never allowed automatically, so a draft taken from an
+  edit that contained real damage names that damage in its header and does
+  not pass the edit it came from. `--policy` proposes additions to an
+  existing policy instead, commented out so that adopting one is a decision.
 - Default-deny policy evaluation with `allow` / `protect` rules and
   `structural` settings.
 - Excel (`.xlsx` / `.xlsm`) checks: values, formulas, formats, merged cells,

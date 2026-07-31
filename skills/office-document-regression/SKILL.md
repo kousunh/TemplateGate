@@ -151,6 +151,13 @@ not re-save it — the second save loses more than the first.
 - **NEVER modify the policy file to make a failing check pass.** The policy
   is the user's trusted specification. If you believe the policy is wrong,
   propose a change and wait for explicit user approval.
+- **NEVER run `templategate suggest` to widen the policy governing your own
+  edit.** `suggest` drafts a policy from an edit a *human* has reviewed and
+  approved. Pointing it at your own candidate and adopting the result would
+  make you the author of the rules you are judged by, which defeats the whole
+  arrangement — the check would then only confirm that you did what you did.
+  If the user asks you to run it, draft from an edit they have approved,
+  write it to a file, and leave adopting it to them.
 - **NEVER deliver a candidate that fails the check** without telling the user
   it failed and why.
 - Do not "fix" unexpected diffs by re-saving the baseline or swapping files.
