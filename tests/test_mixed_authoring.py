@@ -193,6 +193,85 @@ def test_the_default_is_read_from_each_workbook(tmp_path):
     assert snapshot(baseline)["sheets"]["Sheet1"]["cells"]["A1"]["format"] is None
 
 
+def _default_font_swapped(tmp_path, name, size):
+    """A workbook whose *default* font was rewritten, as a locale change or an
+    attack would: every cell that sets no font of its own now renders in it."""
+    from generate import rewrite_zip
+
+    baseline = tmp_path / "b.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws["A1"] = "Total due"
+    wb.save(baseline)
+
+    with zipfile.ZipFile(baseline) as zf:
+        styles = zf.read("xl/styles.xml").decode("utf-8")
+    swapped = (styles.replace('<name val="Calibri"/>', f'<name val="{name}"/>')
+                     .replace('<sz val="11"/>', f'<sz val="{size}"/>'))
+    candidate = tmp_path / "c.xlsx"
+    rewrite_zip(baseline, candidate, add={"xl/styles.xml": swapped.encode("utf-8")})
+    return baseline, candidate
+
+
+def test_a_workbook_wide_default_font_swap_is_visible(tmp_path):
+    """Resolving cells against the default must not hide the default itself.
+
+    Setting the workbook default to 4pt changes how every unstyled cell
+    renders, so it has to be reported somewhere — at workbook level, once,
+    rather than once per cell.
+    """
+    baseline, candidate = _default_font_swapped(tmp_path, "Papyrus", "4")
+    changes = diff(baseline, candidate)
+    assert [(c.location, c.attribute) for c in changes] == [
+        ("workbook#settings", "sheet_settings")
+    ]
+    assert changes[0].detail == (
+        "workbook settings changed: default_font.name Calibri -> Papyrus, "
+        "default_font.size 11.0 -> 4.0")
+
+
+def test_a_default_font_swap_fails_a_strict_policy(tmp_path):
+    from templategate import check
+    from templategate.core.policy import parse_policy
+
+    baseline, candidate = _default_font_swapped(tmp_path, "Papyrus", "4")
+    strict = parse_policy({
+        "target": "excel",
+        "protect": [{"selector": "*", "attributes": ["*"]}],
+    })
+    assert not check(baseline, candidate, strict).passed
+
+
+def test_a_policy_can_allow_the_workbook_settings_that_change(tmp_path):
+    """Mixed authoring changes the default font legitimately; it is addressable."""
+    from templategate import check
+    from templategate.core.policy import parse_policy
+
+    baseline, candidate = _default_font_swapped(tmp_path, "ＭＳ Ｐゴシック", "11")
+    policy = parse_policy({
+        "target": "excel",
+        "allow": [{"selector": "workbook#settings",
+                   "attributes": ["sheet_settings"]}],
+    })
+    assert check(baseline, candidate, policy).passed
+
+
+def test_allowing_workbook_settings_does_not_allow_a_cell_font_change(tmp_path):
+    """The escape hatch is workbook-wide, not a licence on every cell."""
+    from templategate import check
+    from templategate.core.policy import parse_policy
+
+    baseline = _fonted(tmp_path / "b.xlsx", None)
+    candidate = _fonted(tmp_path / "c.xlsx", Font(name="Papyrus", size=4))
+    policy = parse_policy({
+        "target": "excel",
+        "allow": [{"selector": "workbook#settings",
+                   "attributes": ["sheet_settings"]}],
+    })
+    assert not check(baseline, candidate, policy).passed
+
+
 # --- F4: shared strings are storage, not content -------------------------
 
 def test_the_shared_string_table_appearing_is_not_a_change(tmp_path):

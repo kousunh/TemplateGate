@@ -523,7 +523,13 @@ def take_snapshot(path: str | Path) -> dict:
         "defined_names": defined_names,
         "settings": (("calc_mode", _plain(wb_formula.calculation.calcMode)),
                      ("full_calc_on_load",
-                      _plain(wb_formula.calculation.fullCalcOnLoad))),
+                      _plain(wb_formula.calculation.fullCalcOnLoad)),
+                     # Cells resolve their font against this, so a cell that
+                     # sets nothing reports nothing — which would leave a
+                     # workbook-wide switch to 4pt white invisible if the
+                     # default itself were not compared here.
+                     ("default_font.name", default_font[0]),
+                     ("default_font.size", default_font[1])),
         "package": take_package_snapshot(path),
         "part_names": list_part_names(path),
     }
