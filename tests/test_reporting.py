@@ -270,6 +270,79 @@ def test_page_extension_still_allows_a_plain_insertion(tmp_path):
 
 # --- C4: wording a reader can trust --------------------------------------
 
+def _one(change):
+    from templategate.core.model import CheckResult, Violation
+
+    return CheckResult(
+        passed=False, target="word", baseline="b.docx", candidate="c.docx",
+        changes=[change],
+        violations=[Violation(change=change, rule="protected",
+                              message="protected attribute "
+                                      f"{change.attribute!r} changed")])
+
+
+def test_a_change_the_detail_explains_prints_no_old_and_new(tmp_path):
+    """"present -> present" fills two columns and says nothing."""
+    from templategate.core.model import Change
+
+    change = Change("section1#footer:default", "header_footer",
+                    old=None, new=None,
+                    detail="the footer on the default page changed")
+    report = render_text(_one(change))
+    assert "the footer on the default page changed" in report
+    assert "->" not in report.split("Violations:")[1]
+
+
+def test_the_markdown_row_carries_the_detail_when_old_and_new_do_not(tmp_path):
+    from templategate.core.model import Change
+
+    change = Change("section1#footer:default", "header_footer",
+                    old=None, new=None,
+                    detail="the footer on the default page changed")
+    row = [line for line in render_markdown(_one(change)).splitlines()
+           if line.startswith("| error")][0]
+    assert "the footer on the default page changed" in row
+    assert "none" not in row
+
+
+def test_values_are_still_shown_when_nothing_else_explains_them(tmp_path):
+    """Suppression follows the detail, not the shape of old/new.
+
+    The header/footer text summary carries dicts and no detail; hiding those
+    would leave the violation with nothing to say at all.
+    """
+    from templategate.core.model import Change
+
+    change = Change("section1#header_footer", "header_footer",
+                    old={"header": "CONFIDENTIAL"}, new={"header": "PUBLIC"})
+    report = render_text(_one(change))
+    assert "CONFIDENTIAL" in report and "PUBLIC" in report
+
+
+def test_a_real_removal_still_shows_both_sides(tmp_path):
+    from templategate.core.model import Change
+
+    change = Change("section1#footer:default", "header_footer",
+                    old="present", new=None,
+                    detail="the footer on the default page is gone from this section")
+    assert "present -> none" in render_text(_one(change))
+
+
+def test_no_report_ever_says_present_to_present(fixtures, tmp_path):
+    """The whole point: an unchanged-looking pair is never printed."""
+    from generate import rewrite_zip
+
+    baseline = tmp_path / "b.docx"
+    rewrite_zip(fixtures["word_baseline"], baseline, add={})
+    header = ('<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.'
+              'openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r>'
+              "<w:t>{}</w:t></w:r></w:p></w:hdr>")
+    for report in (render_text, render_markdown):
+        rendered = report(check(baseline, baseline, STRICT_WORD))
+        assert "present -> present" not in rendered
+        assert "| present | present |" not in rendered
+
+
 def test_merged_cells_say_so(tmp_path):
     def build(path, merge):
         wb = Workbook()

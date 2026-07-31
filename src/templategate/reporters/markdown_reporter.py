@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..core.model import CheckResult
-from .text_reporter import _grouped, human
+from .text_reporter import _grouped, _worth_showing, human
 
 
 def _escape(text: str) -> str:
@@ -50,10 +50,16 @@ def render_markdown(result: CheckResult) -> str:
                 )
                 continue
             v = members[0]
+            if _worth_showing(v.change):
+                before, after = _cell(v.change.old), _cell(v.change.new)
+            else:
+                # There is no Old/New worth printing, so the row carries the
+                # explanation instead of two columns of "none".
+                before, after = _escape(v.change.detail or v.message), ""
             lines.append(
                 f"| {v.severity} | `{_escape(v.change.location)}` "
                 f"| {_escape(v.change.attribute)} "
-                f"| {_cell(v.change.old)} | {_cell(v.change.new)} "
+                f"| {before} | {after} "
                 f"| {_escape(v.rule)} |"
             )
     if result.semantic_mode != "off" and result.semantic_findings:

@@ -30,6 +30,26 @@ def _fmt(value) -> str:
     return human(value)
 
 
+def _worth_showing(change) -> bool:
+    """Whether an old -> new line tells the reader anything.
+
+    It does not when a named delta already spells the change out in the
+    detail, when both sides are absent, or when the two sides render the same
+    — "present -> present" fills two columns and says nothing, and the detail
+    sentence beside it is doing all the work.
+    """
+    if change.old is None and change.new is None:
+        return False
+    if human(change.old) == human(change.new):
+        return False
+    # A named delta is only redundant if the detail is actually there to say
+    # it; suppressing on shape alone would leave changes with nothing at all
+    # to explain them.
+    if isinstance(change.old, dict) or isinstance(change.new, dict):
+        return not change.detail
+    return True
+
+
 def _grouped(violations):
     """Consecutive violations that describe one edit, folded together.
 
@@ -80,10 +100,7 @@ def render_text(result: CheckResult) -> str:
                 continue
             v = members[0]
             lines.append(f"  [{v.severity}] {v.change.location} ({v.change.attribute}): {v.message}")
-            # A named delta already reads "numfmt #,##0 -> #,##0," in the
-            # detail; repeating it as old=/new= says the same thing twice.
-            spelled_out = isinstance(v.change.old, dict) or isinstance(v.change.new, dict)
-            if not spelled_out and (v.change.old is not None or v.change.new is not None):
+            if _worth_showing(v.change):
                 lines.append(f"      {_fmt(v.change.old)} -> {_fmt(v.change.new)}")
             if v.change.detail:
                 lines.append(f"      {v.change.detail}")

@@ -404,14 +404,18 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
         role = location.split("#", 1)[1].replace(":", " on the ") + " page"
         if new is None:
             detail = f"the {role} is gone from this section"
+            before, after = "present", None
         elif old is None:
             detail = f"a {role} was added to this section"
+            before, after = None, "present"
         else:
+            # Both sides have one and the digests differ.  Saying
+            # "present -> present" would fill the columns with nothing; the
+            # sentence is what carries the meaning here.
             detail = f"the {role} changed"
+            before = after = None
         changes.append(Change(location, ATTR_HEADER_FOOTER,
-                              old=None if old is None else "present",
-                              new=None if new is None else "present",
-                              detail=detail))
+                              old=before, new=after, detail=detail))
 
     b_imgs, c_imgs = Counter(base["images"]), Counter(cand["images"])
     for sha in (b_imgs - c_imgs):
