@@ -335,6 +335,12 @@ def _significant_attributes(element) -> tuple:
     kept = []
     for name, value in element.attrib.items():
         local = name.rsplit("}", 1)[-1]
+        # paraId/textId are per-paragraph session ids Word restamps on every
+        # save.  A nested paragraph's own attributes reach this walk (a table
+        # cell holds w:p children), so without this a real Word edit reports a
+        # markup change whose entire content is a renumbered id.
+        if local in ("paraId", "textId"):
+            continue
         if local.startswith("rsid") or name.startswith(_RELATIONSHIP_NS):
             continue
         # Non-visual properties: an internal handle plus the file the picture

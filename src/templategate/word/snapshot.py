@@ -12,7 +12,11 @@ from pathlib import Path
 
 from docx import Document
 
-from ..core.package import list_part_names, take_package_snapshot
+from ..core.package import (
+    canonical_xml_digest,
+    list_part_names,
+    take_package_snapshot,
+)
 from .content import walk_body
 
 
@@ -87,6 +91,45 @@ def _displayed_images(doc) -> list[str]:
     return sorted(hashes)
 
 
+def _header_footer_parts(doc) -> dict[str, str]:
+    """Header and footer parts keyed by the role they fill.
+
+    Word writes header1..3 and footer1..3, then discards the unused ones and
+    renumbers what is left.  Old header2 becomes new header1 with identical
+    bytes, so comparing by filename reports one modified and two removed for
+    a document nobody touched.  What a reader actually cares about is which
+    header is on the default page, the even page and the first page.
+    """
+    found: dict[str, str] = {}
+    # A header only exists for a reader if the document is set to show it.
+    # Word keeps even-page and first-page parts around while those options are
+    # off and discards them on the next save, which is not a deletion.
+    even_shown = bool(getattr(doc.settings, "odd_and_even_pages_header_footer",
+                              False))
+    for index, section in enumerate(doc.sections, start=1):
+        roles = ("default",
+                 "even" if even_shown else None,
+                 "first" if section.different_first_page_header_footer else None)
+        sources = (
+            ("header", (section.header, section.even_page_header,
+                        section.first_page_header)),
+            ("footer", (section.footer, section.even_page_footer,
+                        section.first_page_footer)),
+        )
+        for kind, parts in sources:
+            for role, source in zip(roles, parts):
+                if role is None or source is None or source.is_linked_to_previous:
+                    continue
+                part = getattr(source, "part", None)
+                if part is None:
+                    continue
+                digest = canonical_xml_digest(part.blob)
+                if digest is None:
+                    digest = hashlib.sha256(part.blob).hexdigest()
+                found[f"section{index}#{kind}:{role}"] = digest
+    return found
+
+
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     doc = Document(str(path))
@@ -111,6 +154,7 @@ def take_snapshot(path: str | Path) -> dict:
         "tables": tables,
         "sections": sections,
         "header_footer": header_footer,
+        "header_footer_parts": _header_footer_parts(doc),
         "images": sorted(images),
         "package": take_package_snapshot(path),
         "part_names": list_part_names(path),

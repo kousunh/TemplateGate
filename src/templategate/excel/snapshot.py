@@ -34,13 +34,31 @@ def _scalar(value):
     return None
 
 
+def _rgb(value) -> str | None:
+    """An ARGB string with its alpha canonicalised.
+
+    openpyxl writes opaque colours as 00RRGGBB and Excel writes the same
+    colour as FFRRGGBB.  Both mean fully opaque, so comparing the raw string
+    reports a colour change every time a library-authored file is opened and
+    saved in Excel.  Only the two opaque spellings are folded together; a
+    genuinely translucent colour keeps its alpha.
+    """
+    text = _scalar(value)
+    if text is None:
+        return None
+    text = str(text)
+    if len(text) == 8 and text[:2].upper() in ("00", "FF"):
+        return "FF" + text[2:].upper()
+    return text
+
+
 def _color(c) -> str | None:
     """A colour as one readable token, so a diff reads FF000000 -> FFFFFFFF."""
     if c is None:
         return None
-    rgb = _scalar(getattr(c, "rgb", None))
+    rgb = _rgb(getattr(c, "rgb", None))
     if rgb is not None:
-        return str(rgb)
+        return rgb
     theme = _scalar(getattr(c, "theme", None))
     if theme is not None:
         tint = _scalar(getattr(c, "tint", None)) or 0
@@ -57,7 +75,22 @@ def _side(s) -> tuple | None:
     return (s.style, _color(s.color))
 
 
-def _format_key(cell) -> tuple | None:
+def _default_font(workbook) -> tuple:
+    """The font a cell gets when it does not ask for one.
+
+    Excel materialises this onto every cell on save, and it is
+    locale-dependent — a Japanese Excel writes ＭＳ Ｐゴシック where a library
+    wrote nothing at all.  Resolving each cell against its own workbook's
+    default makes the comparison say the same thing on any machine.
+    """
+    fonts = getattr(workbook, "_fonts", None)
+    if not fonts:
+        return (None, None)
+    first = fonts[0]
+    return (_plain(getattr(first, "name", None)), _plain(getattr(first, "sz", None)))
+
+
+def _format_key(cell, default_font: tuple = (None, None)) -> tuple | None:
     """A cell's style as named fields.  None == no style at all.
 
     Named rather than positional so a difference can be reported as
@@ -76,8 +109,10 @@ def _format_key(cell) -> tuple | None:
         if value is not None and value != default:
             fields[name] = value
 
-    record("font.name", _plain(f.name))
-    record("font.size", _plain(f.size))
+    # A cell that merely inherits the workbook default is not styled, however
+    # explicitly the file happens to spell that out.
+    record("font.name", _plain(f.name), default=default_font[0])
+    record("font.size", _plain(f.size), default=default_font[1])
     record("font.bold", bool(f.bold), default=False)
     record("font.italic", bool(f.italic), default=False)
     record("font.underline", _plain(f.underline))
@@ -103,7 +138,10 @@ def _format_key(cell) -> tuple | None:
     # is compared separately; an *unlocked* cell is the notable one.
     record("protect.locked", _plain(cell.protection.locked), default=True)
     record("protect.hidden", _plain(cell.protection.hidden), default=False)
-    return tuple(sorted(fields.items()))
+    # A style that sets nothing beyond the workbook defaults is not a style.
+    # Excel materialises the default font onto every cell on save, which makes
+    # `has_style` true for cells that still say exactly nothing.
+    return tuple(sorted(fields.items())) if fields else None
 
 
 def _plain(value):
@@ -146,8 +184,8 @@ def _rich_runs(value) -> tuple | None:
             f = item.font
             runs.append((
                 item.text, _plain(f.b), _plain(f.i), _plain(f.u), _plain(f.sz),
-                _plain(f.rFont), _plain(getattr(f.color, "rgb", None)
-                                        if f.color is not None else None),
+                _plain(f.rFont), _rgb(getattr(f.color, "rgb", None)
+                                      if f.color is not None else None),
             ))
         else:
             runs.append((str(item), None, None, None, None, None, None))
@@ -180,13 +218,13 @@ def _populated(ws):
     return [grid[key] for key in sorted(grid)]
 
 
-def _cells(ws_formula, ws_value) -> dict:
+def _cells(ws_formula, ws_value, default_font: tuple = (None, None)) -> dict:
     cells: dict[str, dict] = {}
     value_grid = getattr(ws_value, "_cells", {})
     for cell in _populated(ws_formula):
         formula = _formula_of(cell.value)
         runs = _rich_runs(cell.value)
-        fmt = _format_key(cell)
+        fmt = _format_key(cell, default_font)
         if runs is not None:
             fmt = (fmt or ()) + (("runs", runs),)
         if formula:
@@ -246,15 +284,28 @@ def _conditional_formatting(ws) -> dict:
     return out
 
 
+def _or_default(value, default):
+    """An attribute Excel omitted still means what the schema says it means.
+
+    Excel drops attributes that hold their default value, so a rule written
+    by a library with errorStyle="stop" comes back with no errorStyle at all.
+    Filling the documented default makes the two spellings equal — while a
+    real downgrade to "information" is an explicit value and stays visible.
+    """
+    return default if value is None else value
+
+
 def _data_validation(ws) -> dict:
     out: dict[str, tuple] = {}
     for dv in ws.data_validations.dataValidation:
         out[str(dv.sqref)] = (
-            dv.type, dv.operator, dv.formula1, dv.formula2,
-            bool(dv.allowBlank), dv.showDropDown,
+            dv.type, _or_default(dv.operator, "between"),
+            dv.formula1, dv.formula2,
+            bool(dv.allowBlank), bool(dv.showDropDown),
             # How hard the rule pushes back.  Turning errorStyle from "stop"
             # to "information" leaves the rule in place but lets anything through.
-            dv.errorStyle, bool(dv.showErrorMessage), bool(dv.showInputMessage),
+            _or_default(dv.errorStyle, "stop"),
+            bool(dv.showErrorMessage), bool(dv.showInputMessage),
             dv.errorTitle, dv.error, dv.promptTitle, dv.prompt,
         )
     return out
@@ -361,7 +412,8 @@ _EMPTY_SHEET = {
 
 
 def _sheet_snapshot(ws, index: int, wb_value, *,
-                    ignored_errors: str | None = None) -> dict:
+                    ignored_errors: str | None = None,
+                    default_font: tuple = (None, None)) -> dict:
     """One sheet's contents.
 
     A workbook may also contain chartsheets, which carry no cell grid at all —
@@ -378,7 +430,7 @@ def _sheet_snapshot(ws, index: int, wb_value, *,
         return {**common, **_EMPTY_SHEET}
     return {
         **common,
-        "cells": _cells(ws, wb_value[ws.title]),
+        "cells": _cells(ws, wb_value[ws.title], default_font),
         "merges": sorted(str(m) for m in ws.merged_cells.ranges),
         "conditional_formatting": _conditional_formatting(ws),
         "data_validation": _data_validation(ws),
@@ -452,11 +504,13 @@ def take_snapshot(path: str | Path) -> dict:
     wb_value = load_workbook(path, data_only=True)
 
     suppressed = _ignored_errors(path)
+    default_font = _default_font(wb_formula)
     sheets: dict[str, dict] = {}
     for index, name in enumerate(wb_formula.sheetnames):
         ws = wb_formula[name]
         sheets[name] = _sheet_snapshot(ws, index, wb_value,
-                                       ignored_errors=suppressed.get(name))
+                                       ignored_errors=suppressed.get(name),
+                                       default_font=default_font)
 
     defined_names = {}
     for name, dn in wb_formula.defined_names.items():

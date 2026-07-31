@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-import re
 import zipfile
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -101,6 +100,23 @@ EXCLUDED_PREFIXES = (
     "word/printerSettings/",
     "xl/media/",
     "word/media/",
+    # Whether a string lives in the shared table or inline in the cell is a
+    # storage decision the writer makes; the strings themselves are already
+    # compared cell by cell.  Excel moves inline strings into the shared
+    # table on save, which is not an edit.
+    "xl/sharedStrings.xml",
+    # The font table is a manifest of the fonts the document references, not
+    # a statement about any of them: which font a run uses is compared as run
+    # formatting.  Word regenerates it per locale, adding entries for fonts
+    # the theme pulls in, which is not an edit to the document.
+    "word/fontTable.xml",
+    "word/glossary/fontTable.xml",
+    # Word authors header1..3/footer1..3, drops the unused ones on save and
+    # renumbers the rest, so comparing them by filename reports a storm of
+    # modified-and-removed for content that never changed.  They are compared
+    # by the role they fill instead (see word/snapshot.py).
+    "word/header",
+    "word/footer",
     # Worksheets are the one part family that legitimately comes and goes, and
     # both their presence and their contents are already reported by name
     # ("sheet:Notes", "Notes!B2").  Tracking the files as well would restate
@@ -117,7 +133,6 @@ EXCLUDED_PREFIXES = (
 # Their presence is still tracked: losing one outright is real damage.
 PRESENCE_ONLY_PREFIXES = (
     "xl/workbook.xml",
-    "xl/sharedStrings.xml",
     "xl/styles.xml",
     "word/document.xml",
 )
@@ -127,14 +142,6 @@ _PRESENT = "present"
 # is touched, so their bytes say nothing — but the external targets inside
 # them do, and those are extracted separately.
 _RELS_SEGMENT = "_rels"
-
-# Word rewrites these on every save without changing the document: revision
-# save ids, proofing error marks, and whitespace between elements.
-_WORD_NOISE = (
-    re.compile(rb'\sw:rsid[A-Za-z]*="[^"]*"'),
-    re.compile(rb"<w:proofErr[^/>]*/>"),
-)
-_BETWEEN_TAGS = re.compile(rb">\s+<")
 
 # Drawing elements worth counting.  A drawing part is summarized by which
 # shapes it holds rather than by its bytes, for two reasons: openpyxl injects
@@ -173,10 +180,143 @@ def _categorize(name: str) -> str:
     return FALLBACK_CATEGORY
 
 
-def _normalize_word_xml(data: bytes) -> bytes:
-    for pattern in _WORD_NOISE:
-        data = pattern.sub(b"", data)
-    return _BETWEEN_TAGS.sub(b"><", data).strip()
+# Attributes and elements that record who edited what, when, in which
+# session.  Word and Excel rewrite them on every save; none of them say
+# anything about what the document contains.
+_BOOKKEEPING_NAMESPACES = (
+    "{http://schemas.microsoft.com/office/spreadsheetml/2014/revision}",
+    "{http://schemas.microsoft.com/office/spreadsheetml/2014/11/main}",
+    "{http://schemas.microsoft.com/office/spreadsheetml/2015/revision}",
+    "{http://schemas.microsoft.com/office/spreadsheetml/2016/revision3}",
+    "{http://schemas.microsoft.com/office/spreadsheetml/2017/revision16}",
+)
+_BOOKKEEPING_LOCAL_NAMES = frozenset({
+    "Ignorable", "paraId", "textId", "uid",
+    # w:rFonts/@w:hint says which font table to consult for ambiguous
+    # characters.  Word recomputes it on save; the font names beside it are
+    # the part that means something, and those are compared as run formatting.
+    "hint",
+})
+# Elements that record the editor's own state rather than the document's:
+# revision session ids, proofing marks, the shape-id allocator, and the
+# defaults Word would apply to the *next* shape someone draws.
+_BOOKKEEPING_ELEMENTS = frozenset({
+    "proofErr", "lastRenderedPageBreak", "rsid",
+    "shapeDefaults", "hdrShapeDefaults",
+})
+
+# Word regenerates the separator rules drawn above footnotes and endnotes on
+# every save, down to which font hint they carry.  They are furniture, not
+# content; the notes themselves are compared normally.
+_W_NAMESPACE = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_GENERATED_NOTE_TYPES = frozenset({
+    "separator", "continuationSeparator", "continuationNotice",
+})
+
+
+# Property containers: they say something only through their attributes or
+# children, so once bookkeeping is filtered out an empty one says nothing.
+# Presence-only markers such as <w:b/> are deliberately not in this set —
+# those mean everything by merely existing.
+_EMPTY_MEANS_NOTHING = frozenset({"rPr", "pPr", "rFonts"})
+
+
+def _is_generated_note(element) -> bool:
+    return (element.tag in (_W_NAMESPACE + "footnote", _W_NAMESPACE + "endnote")
+            and element.get(_W_NAMESPACE + "type") in _GENERATED_NOTE_TYPES)
+
+
+def _is_bookkeeping_attribute(name: str) -> bool:
+    if name.startswith(_BOOKKEEPING_NAMESPACES):
+        return True
+    local = name.rsplit("}", 1)[-1]
+    return local in _BOOKKEEPING_LOCAL_NAMES or local.startswith("rsid")
+
+
+# An OOXML writer may omit any attribute that holds its default value, and
+# the two writers disagree about which ones to bother writing: openpyxl spells
+# out headerRowCount and leaves the table-style flags off, Excel does the
+# reverse.  Filling the documented default on both sides makes the two
+# spellings of the same table compare equal.  Deliberately narrow — only
+# attributes actually observed to churn, never a blanket schema default.
+_SML = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_ATTRIBUTE_DEFAULTS = {
+    _SML + "table": {
+        "headerRowCount": "1", "totalsRowCount": "0", "totalsRowShown": "1",
+        "insertRow": "0", "published": "1",
+    },
+    _SML + "tableStyleInfo": {
+        "showFirstColumn": "0", "showLastColumn": "0",
+        "showRowStripes": "0", "showColumnStripes": "0",
+    },
+    _SML + "autoFilter": {},
+}
+_BOOLEAN_WORDS = {"true": "1", "false": "0", "on": "1", "off": "0"}
+
+
+def _defaulted_attributes(tag: str, attributes) -> list[tuple[str, str]]:
+    kept = {name: value for name, value in attributes.items()
+            if not _is_bookkeeping_attribute(name)}
+    defaults = _ATTRIBUTE_DEFAULTS.get(tag)
+    if defaults:
+        for name, default in defaults.items():
+            kept.setdefault(name, default)
+        for name in defaults:
+            kept[name] = _BOOLEAN_WORDS.get(str(kept[name]).lower(), kept[name])
+    return sorted(kept.items())
+
+
+def canonical_xml_digest(data: bytes) -> str | None:
+    """Fingerprint a part by its structure, or None if it is not XML.
+
+    Comparing bytes makes every re-save look like an edit: Excel adds an XML
+    declaration and its revision namespaces, Word renumbers session ids and
+    reflows whitespace.  Comparing structure asks the only question that
+    matters — does this part still say the same thing — and streams straight
+    into the hash so a multi-megabyte part costs one pass and no garbage.
+    """
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+    buffer = bytearray()
+
+    def significant(element) -> bool:
+        """Whether anything survives the filtering for this element."""
+        if element.tag.rsplit("}", 1)[-1] not in _EMPTY_MEANS_NOTHING:
+            return True
+        if any(not _is_bookkeeping_attribute(name) for name in element.attrib):
+            return True
+        return any(significant(child) for child in element
+                   if isinstance(child.tag, str))
+
+    def walk(element) -> None:
+        tag = element.tag
+        if not isinstance(tag, str):  # comments and processing instructions
+            return
+        if tag.rsplit("}", 1)[-1] in _BOOKKEEPING_ELEMENTS:
+            return
+        if _is_generated_note(element) or not significant(element):
+            return
+        buffer.extend(b"<")
+        buffer.extend(tag.encode("utf-8"))
+        attributes = element.attrib
+        if attributes or tag in _ATTRIBUTE_DEFAULTS:
+            for name, value in _defaulted_attributes(tag, attributes):
+                buffer.extend(b"|")
+                buffer.extend(name.encode("utf-8"))
+                buffer.extend(b"=")
+                buffer.extend(str(value).encode("utf-8"))
+        text = element.text
+        if text and text.strip():
+            buffer.extend(b">")
+            buffer.extend(text.strip().encode("utf-8"))
+        for child in element:
+            walk(child)
+        buffer.extend(b"/")
+
+    walk(root)
+    return hashlib.sha256(buffer).hexdigest()
 
 
 def _shape_summary(data: bytes) -> str | None:
@@ -215,9 +355,19 @@ def _digest(category: str, name: str, data: bytes) -> str | None:
             return None
         if summary is not None:
             return hashlib.sha256(summary.encode("utf-8")).hexdigest()
-    if name.startswith("word/") and name.endswith(".xml"):
-        data = _normalize_word_xml(data)
+    if name.endswith((".xml", ".rels")):
+        canonical = canonical_xml_digest(data)
+        if canonical is not None:
+            return canonical
     return hashlib.sha256(data).hexdigest()
+
+
+# Extension blocks that describe the program that saved the file rather than
+# anything in it.  Excel stamps its calculation-engine feature list onto every
+# save, so counting it would make opening and closing a workbook an edit.
+_WRITER_EXTENSION_URIS = frozenset({
+    "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}",  # xcalcf:calcFeatures
+})
 
 
 def _extension_digest(data: bytes) -> str | None:
@@ -230,11 +380,12 @@ def _extension_digest(data: bytes) -> str | None:
     for element in root.iter():
         if element.tag.rsplit("}", 1)[-1] != "extLst":
             continue
-        raw = ElementTree.tostring(element)
-        try:
-            blocks.append(ElementTree.canonicalize(raw.decode("utf-8")))
-        except Exception:  # pragma: no cover - canonicalize is best effort
-            blocks.append(raw.decode("utf-8", "replace"))
+        for extension in element:
+            if extension.get("uri", "").upper() in _WRITER_EXTENSION_URIS:
+                continue
+            digest = canonical_xml_digest(ElementTree.tostring(extension))
+            if digest is not None:
+                blocks.append(digest)
     if not blocks:
         return None
     return hashlib.sha256("".join(sorted(blocks)).encode("utf-8")).hexdigest()
@@ -383,6 +534,13 @@ def _describe(category: str, name: str, old, new) -> str:
         return f"{what} removed: {name}"
     if old is None:
         return f"{what} added: {name}"
+    if "/theme/" in name:
+        # Worth reporting — theme colours and fonts are what every
+        # theme-referencing cell renders as — but worth explaining, because
+        # the commonest cause is not an edit at all.
+        return ("theme replaced (colours and fonts that reference the theme "
+                "may render differently); this is usual when a file written "
+                "by a library is then saved by Excel or Word")
     return f"{what} modified: {name}"
 
 

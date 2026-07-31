@@ -389,6 +389,30 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
             changes.append(Change(f"section{i + 1}#header_footer", ATTR_HEADER_FOOTER,
                                   old=old, new=new))
 
+    # Header and footer parts, compared by the role they fill rather than the
+    # filename they happen to have.  A section whose header text already
+    # reported a change does not also report its part digest — that would say
+    # the same thing twice, the second time opaquely.
+    b_parts = base.get("header_footer_parts", {})
+    c_parts = cand.get("header_footer_parts", {})
+    said_already = {change.location.split("#", 1)[0] for change in changes
+                    if change.attribute == ATTR_HEADER_FOOTER}
+    for location in sorted(b_parts.keys() | c_parts.keys()):
+        old, new = b_parts.get(location), c_parts.get(location)
+        if old == new or location.split("#", 1)[0] in said_already:
+            continue
+        role = location.split("#", 1)[1].replace(":", " on the ") + " page"
+        if new is None:
+            detail = f"the {role} is gone from this section"
+        elif old is None:
+            detail = f"a {role} was added to this section"
+        else:
+            detail = f"the {role} changed"
+        changes.append(Change(location, ATTR_HEADER_FOOTER,
+                              old=None if old is None else "present",
+                              new=None if new is None else "present",
+                              detail=detail))
+
     b_imgs, c_imgs = Counter(base["images"]), Counter(cand["images"])
     for sha in (b_imgs - c_imgs):
         changes.append(Change(f"#image:{sha[:8]}", ATTR_IMAGES, old="present", new=None,
