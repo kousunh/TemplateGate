@@ -383,7 +383,8 @@ def _sheet_settings(ws) -> tuple:
         ("auto_filter", _plain(ws.auto_filter.ref)),
         ("tab_color", _color(ws.sheet_properties.tabColor)),
         ("gridlines", _plain(getattr(ws.sheet_view, "showGridLines", None))),
-        ("zoom", _plain(getattr(ws.sheet_view, "zoomScale", None))),
+        # An absent zoom is 100%; writers disagree about spelling it out.
+        ("zoom", _plain(getattr(ws.sheet_view, "zoomScale", None)) or 100),
         ("right_to_left", _plain(getattr(ws.sheet_view, "rightToLeft", None))),
     )
 
@@ -554,6 +555,21 @@ def _ignored_errors(path: Path) -> dict[str, str]:
         return {}
 
 
+def _calc_mode(workbook) -> str:
+    """How the workbook recalculates, defaulting the way the schema does.
+
+    <calcPr/> is optional and its calcMode attribute is optional within it;
+    writers that leave either out mean "auto".  Reading the attribute off a
+    workbook that has no calcPr at all raises, which used to sink the whole
+    snapshot — every cell, formula and format in a file written by such a
+    tool became invisible because of one missing element.
+    """
+    calculation = getattr(workbook, "calculation", None)
+    if calculation is None:
+        return "auto"
+    return _plain(calculation.calcMode) or "auto"
+
+
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     wb_formula = load_workbook(path, data_only=False, rich_text=True)
@@ -578,9 +594,12 @@ def take_snapshot(path: str | Path) -> dict:
         "format": path.suffix.lstrip(".").lower(),
         "sheets": sheets,
         "defined_names": defined_names,
-        "settings": (("calc_mode", _plain(wb_formula.calculation.calcMode)),
-                     ("full_calc_on_load",
-                      _plain(wb_formula.calculation.fullCalcOnLoad)),
+        # fullCalcOnLoad is deliberately absent: it asks Excel to recalculate
+        # when opening and says nothing about what the file contains.  openpyxl
+        # always writes it, SheetJS never does, and neither is an edit.  Manual
+        # calculation mode stays, because that one lets formulas show stale
+        # answers to a reader.
+        "settings": (("calc_mode", _calc_mode(wb_formula)),
                      # Cells resolve their font against this, so a cell that
                      # sets nothing reports nothing — which would leave a
                      # workbook-wide switch to 4pt white invisible if the

@@ -98,13 +98,29 @@ def _diff_snapshots(base: dict, cand: dict, target: str, *, align: bool) -> list
     return diff_snapshots(base, cand, align=align)
 
 
-def diff(baseline: str | Path, candidate: str | Path, *,
-         align: bool = False) -> list[Change]:
+def diff_report(baseline: str | Path, candidate: str | Path, *,
+                align: bool = False) -> tuple[list[Change], dict[str, str]]:
+    """The changes, and any document that could only be read in part.
+
+    Callers that report to a person need the second half: an empty change
+    list means something very different when one of the documents could not
+    be opened properly, and saying "no changes" then would be a lie.
+    """
     target = detect_target(baseline)
     if detect_target(candidate) != target:
         raise ValueError("baseline and candidate must be the same document type")
-    return _diff_snapshots(snapshot(baseline), snapshot(candidate), target,
-                           align=align)
+    base_snap, cand_snap = snapshot(baseline), snapshot(candidate)
+    degraded = {
+        role: snap["degraded"]
+        for role, snap in (("baseline", base_snap), ("candidate", cand_snap))
+        if snap.get("degraded")
+    }
+    return _diff_snapshots(base_snap, cand_snap, target, align=align), degraded
+
+
+def diff(baseline: str | Path, candidate: str | Path, *,
+         align: bool = False) -> list[Change]:
+    return diff_report(baseline, candidate, align=align)[0]
 
 
 def check(

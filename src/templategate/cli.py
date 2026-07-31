@@ -3,8 +3,11 @@
 Exit codes: 0 = PASS, 1 = FAIL, 2 = execution/configuration error.
 
 A document that opens as a package but has lost a part it still references is
-damage, not an error: it reports the missing parts and exits 1.  Exit 2 is for
-files that are not readable containers at all, and for policy and IO problems.
+damage, not an error: `check` reports the missing parts and exits 1, because
+default deny means a document nobody could verify does not pass.  `diff` makes
+no such judgement, so for it the same document is exit 2 — it could not do the
+comparison it was asked for.  Exit 2 also covers files that are not readable
+containers at all, and policy and IO problems.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .api import check, diff, snapshot
+from .api import check, diff_report, snapshot
 from .core.policy import PolicyError, SAMPLE_POLICY_EXCEL, SAMPLE_POLICY_WORD
 from .reporters import RENDERERS
 
@@ -130,19 +133,29 @@ def _dispatch(args: argparse.Namespace) -> int:
         return 0 if result.passed else 1
 
     if args.command == "diff":
-        changes = diff(args.baseline, args.candidate)
+        changes, degraded = diff_report(args.baseline, args.candidate)
+        for role, reason in degraded.items():
+            print(f"templategate: warning: the {role} document is damaged: {reason}",
+                  file=sys.stderr)
+            print("templategate: warning: only its package parts could be "
+                  "compared — cell, paragraph and formatting contents were not",
+                  file=sys.stderr)
         if args.json:
             print(json.dumps([c.to_dict() for c in changes],
                              ensure_ascii=False, indent=2, default=str))
         elif not changes:
-            print("no changes")
+            # Never a bare "no changes" for a document we could not read: the
+            # whole point of running diff is to find out what moved, and
+            # silence would read as "nothing did".
+            print("no differences among the parts that could be read"
+                  if degraded else "no changes")
         else:
             for c in changes:
                 line = f"{c.location} ({c.attribute}): {c.old!r} -> {c.new!r}"
                 if c.detail:
                     line += f"  [{c.detail}]"
                 print(line)
-        return 0
+        return 2 if degraded else 0
 
     if args.command == "snapshot":
         snap = snapshot(args.file)

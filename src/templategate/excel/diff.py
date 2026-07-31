@@ -126,15 +126,18 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
                               new="present",
                               detail=_rename_detail("added", "renamed from", pair)))
 
+    font_defaults = (dict(base.get("settings", ())), dict(cand.get("settings", ())))
     for name in sorted(base_sheets.keys() & cand_sheets.keys()):
-        changes.extend(_diff_sheet(name, base_sheets[name], cand_sheets[name]))
+        changes.extend(_diff_sheet(name, base_sheets[name], cand_sheets[name],
+                                   font_defaults=font_defaults))
 
     # A renamed sheet keeps being compared cell by cell, reported under its
     # baseline name so that policy selectors written against the template
     # still apply.
     for old_name, new_name, _score in renames:
         changes.extend(_diff_sheet(old_name, base_sheets[old_name],
-                                   cand_sheets[new_name], include_structure=False))
+                                   cand_sheets[new_name], include_structure=False,
+                                   font_defaults=font_defaults))
 
     for name in base.get("defined_names", {}).keys() | cand.get("defined_names", {}).keys():
         old = base.get("defined_names", {}).get(name)
@@ -209,8 +212,38 @@ def _diff_images(sheet: str, gone: set, arrived: set) -> list[Change]:
     return changes
 
 
+_INHERITED_FONT_FIELDS = (("font.name", "default_font.name"),
+                          ("font.size", "default_font.size"))
+
+
+def _resolve_inherited_fonts(delta: dict, defaults: tuple[dict, dict]) -> None:
+    """Drop font differences that are only about who spelled the default out.
+
+    A cell records a font only when it differs from its own workbook's
+    default, and writers disagree about that default: ExcelJS resets it to
+    Calibri while stamping the real font onto every cell, so the same-looking
+    cell is "inherited" in one file and "explicit" in the other.  Comparing
+    what each cell *renders as* settles it — and when both sides inherit, the
+    difference is the workbook default itself, which is reported once at
+    workbook#settings rather than on every cell.
+    """
+    base_defaults, cand_defaults = defaults
+    for field, default_field in _INHERITED_FONT_FIELDS:
+        if field not in delta:
+            continue
+        before, after = delta[field]
+        if before is None and after is None:
+            del delta[field]
+            continue
+        effective_before = before if before is not None else base_defaults.get(default_field)
+        effective_after = after if after is not None else cand_defaults.get(default_field)
+        if effective_before == effective_after:
+            del delta[field]
+
+
 def _diff_sheet(name: str, b: dict, c: dict, *,
-                include_structure: bool = True) -> list[Change]:
+                include_structure: bool = True,
+                font_defaults: tuple[dict, dict] = ({}, {})) -> list[Change]:
     changes: list[Change] = []
     sheet = quote_sheet(name)
 
@@ -244,6 +277,9 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
                                   new=new["formula"], detail=detail))
         if old["format"] != new["format"]:
             delta = field_delta(old["format"], new["format"])
+            _resolve_inherited_fonts(delta, font_defaults)
+            if not delta:
+                continue
             if "numfmt" in delta:
                 # An absent number format is not "no information", it is
                 # General.  Printing it as "none" would read the same as a
