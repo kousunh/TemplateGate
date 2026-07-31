@@ -343,6 +343,112 @@ def test_no_report_ever_says_present_to_present(fixtures, tmp_path):
         assert "| present | present |" not in rendered
 
 
+def test_a_nudged_image_reads_as_one_move(tmp_path):
+    """The same picture at a new anchor is a move, not a replacement.
+
+    It arrives as a removal and an addition carrying identical content
+    hashes; printing both reads as if the picture might be gone.
+    """
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image as PILImage
+
+    logo = tmp_path / "logo.png"
+    PILImage.new("RGB", (40, 40), (10, 90, 200)).save(logo)
+
+    def build(path, anchor):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "見積書"
+        ws["A1"] = "x"
+        ws.add_image(XLImage(str(logo)), anchor)
+        wb.save(path)
+        return path
+
+    changes = diff(build(tmp_path / "b.xlsx", "C3"),
+                   build(tmp_path / "c.xlsx", "H12"))
+    assert len(changes) == 1
+    assert changes[0].detail == "same image, moved from C3 to H12"
+
+
+def test_a_replaced_image_still_reads_as_two_lines(tmp_path):
+    """Different content is a replacement, and must not be called a move."""
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image as PILImage
+
+    def build(path, colour):
+        logo = tmp_path / f"logo{colour[0]}.png"
+        PILImage.new("RGB", (40, 40), colour).save(logo)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "見積書"
+        ws["A1"] = "x"
+        ws.add_image(XLImage(str(logo)), "C3")
+        wb.save(path)
+        return path
+
+    changes = diff(build(tmp_path / "b.xlsx", (10, 90, 200)),
+                   build(tmp_path / "c.xlsx", (200, 30, 30)))
+    assert len(changes) == 2
+    assert {c.detail for c in changes} == {"image removed from C3",
+                                           "image added at C3"}
+
+
+def test_a_resized_image_says_resized():
+    """Exercised directly: openpyxl re-derives size from the file on load."""
+    from templategate.excel.diff import _diff_images
+
+    sha = "a" * 64
+    changes = _diff_images("Sheet1", {(sha, (2, 2), (40, 40))},
+                           {(sha, (2, 2), (120, 120))})
+    assert [c.detail for c in changes] == [
+        "same image, resized from 40x40 to 120x120"]
+
+
+def test_an_image_both_moved_and_resized_says_both():
+    from templategate.excel.diff import _diff_images
+
+    sha = "b" * 64
+    changes = _diff_images("Sheet1", {(sha, (2, 2), (40, 40))},
+                           {(sha, (7, 11), (120, 120))})
+    assert changes[0].detail == (
+        "same image, moved from C3 to H12 and resized from 40x40 to 120x120")
+
+
+def test_a_layout_change_reads_in_words(tmp_path):
+    def build(path, width, hidden):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "見積書"
+        ws["A1"] = "x"
+        ws.column_dimensions["H"].width = width
+        ws.column_dimensions["H"].hidden = hidden
+        wb.save(path)
+        return path
+
+    widened = diff(build(tmp_path / "b.xlsx", 8.43, True),
+                   build(tmp_path / "c.xlsx", 13, True))
+    assert widened[0].detail == (
+        "row or column changed: column width 8.43 -> 13.0 (still hidden)")
+
+    unhidden = diff(build(tmp_path / "d.xlsx", 8.43, True),
+                    build(tmp_path / "e.xlsx", 8.43, False))
+    assert unhidden[0].detail == "row or column changed: hidden True -> False"
+
+
+def test_a_row_height_change_says_row_height(tmp_path):
+    def build(path, height):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "見積書"
+        ws["A1"] = "x"
+        ws.row_dimensions[4].height = height
+        wb.save(path)
+        return path
+
+    changes = diff(build(tmp_path / "b.xlsx", 15), build(tmp_path / "c.xlsx", 40))
+    assert changes[0].detail == "row or column changed: row height 15.0 -> 40.0"
+
+
 def test_merged_cells_say_so(tmp_path):
     def build(path, merge):
         wb = Workbook()

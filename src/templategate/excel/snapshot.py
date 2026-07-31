@@ -14,12 +14,50 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.utils.datetime import from_excel
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
 from openpyxl.worksheet.worksheet import Worksheet
 
 from ..core.package import list_part_names, take_package_snapshot
 
 _DEFAULT_CELL = {"value": None, "formula": None, "format": None}
+
+
+# Number-format ids 27-36 and 50-58 are reserved by the spec for East Asian
+# locales, and openpyxl cannot resolve any of them — it hands back "General",
+# which is also what a cell with no format at all reports.  That made a
+# Japanese quotation's 「2026年7月1日」 indistinguishable from an unformatted
+# number, so switching it to the imperial era or to a time format passed
+# silently.  The id is compared instead, with the documented Japanese meaning
+# attached for the reader; the id is what makes the comparison exact, the
+# hint is a pure function of it and can never cause a difference of its own.
+_LOCALE_BUILTIN_HINTS = {
+    27: 'ge.m.d', 28: 'ggge"年"m"月"d"日"', 29: 'ggge"年"m"月"d"日"',
+    30: 'm/d/yy', 31: 'yyyy"年"m"月"d"日"', 32: 'h"時"mm"分"',
+    33: 'h"時"mm"分"ss"秒"', 34: 'yyyy"年"m"月"', 35: 'm"月"d"日"',
+    36: 'ge.m.d',
+}
+# Every id in these ranges is a date or a time.  openpyxl decides whether to
+# convert a serial number to a datetime by reading the format string, so for
+# a format it cannot read it leaves the raw serial — which means changing
+# only the *format* flipped the *value* between 46204 and an ISO datetime.
+_LOCALE_BUILTIN_DATE_IDS = frozenset(range(27, 37)) | frozenset(range(50, 59))
+
+GENERAL_FORMAT = "General"
+
+
+def number_format_of(cell) -> str:
+    """The cell's number format, by id when the code cannot be resolved."""
+    format_id = getattr(getattr(cell, "_style", None), "numFmtId", None)
+    resolved = _plain(cell.number_format)
+    if resolved and resolved != GENERAL_FORMAT:
+        return resolved
+    if not format_id:  # id 0 really is General
+        return GENERAL_FORMAT
+    hint = _LOCALE_BUILTIN_HINTS.get(format_id)
+    if hint:
+        return f"builtin:{format_id} ({hint})"
+    return f"builtin:{format_id} (unresolved)"
 
 
 def _scalar(value):
@@ -133,7 +171,7 @@ def _format_key(cell, default_font: tuple = (None, None)) -> tuple | None:
     record("align.wrap_text", bool(a.wrap_text), default=False)
     record("align.rotation", _plain(a.text_rotation), default=0)
     record("align.indent", _plain(a.indent), default=0)
-    record("numfmt", _plain(cell.number_format), default="General")
+    record("numfmt", number_format_of(cell), default=GENERAL_FORMAT)
     # Locked is the default and only bites once the sheet is protected, which
     # is compared separately; an *unlocked* cell is the notable one.
     record("protect.locked", _plain(cell.protection.locked), default=True)
@@ -218,7 +256,22 @@ def _populated(ws):
     return [grid[key] for key in sorted(grid)]
 
 
-def _cells(ws_formula, ws_value, default_font: tuple = (None, None)) -> dict:
+def _as_date_if_locale_builtin(cell, value, epoch):
+    """Convert a serial number openpyxl left alone because it could not read
+    the format.  Without this, changing only the format changes the *value*."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    format_id = getattr(getattr(cell, "_style", None), "numFmtId", None)
+    if format_id not in _LOCALE_BUILTIN_DATE_IDS:
+        return value
+    try:
+        return from_excel(value, epoch)
+    except (ValueError, OverflowError):
+        return value
+
+
+def _cells(ws_formula, ws_value, default_font: tuple = (None, None),
+           epoch=None) -> dict:
     cells: dict[str, dict] = {}
     value_grid = getattr(ws_value, "_cells", {})
     for cell in _populated(ws_formula):
@@ -232,7 +285,7 @@ def _cells(ws_formula, ws_value, default_font: tuple = (None, None)) -> dict:
             cached = cached_cell.value if cached_cell is not None else None
         else:
             cached = cell.value
-        cached = _plain(cached)
+        cached = _plain(_as_date_if_locale_builtin(cell, cached, epoch))
         if cached is None and formula is None and fmt is None:
             continue
         cells[cell.coordinate] = {
@@ -344,10 +397,12 @@ def _layout(ws) -> dict:
     out: dict[str, tuple] = {}
     for index, dim in ws.row_dimensions.items():
         if dim.hidden or dim.height is not None:
-            out[f"{index}:{index}"] = (bool(dim.hidden), _plain(dim.height))
+            out[f"{index}:{index}"] = (("hidden", bool(dim.hidden)),
+                                       ("row height", _plain(dim.height)))
     for letter, dim in ws.column_dimensions.items():
         if dim.hidden or dim.width is not None:
-            out[f"{letter}:{letter}"] = (bool(dim.hidden), _plain(dim.width))
+            out[f"{letter}:{letter}"] = (("hidden", bool(dim.hidden)),
+                                         ("column width", _plain(dim.width)))
     return out
 
 
@@ -413,7 +468,8 @@ _EMPTY_SHEET = {
 
 def _sheet_snapshot(ws, index: int, wb_value, *,
                     ignored_errors: str | None = None,
-                    default_font: tuple = (None, None)) -> dict:
+                    default_font: tuple = (None, None),
+                    epoch=None) -> dict:
     """One sheet's contents.
 
     A workbook may also contain chartsheets, which carry no cell grid at all —
@@ -430,7 +486,7 @@ def _sheet_snapshot(ws, index: int, wb_value, *,
         return {**common, **_EMPTY_SHEET}
     return {
         **common,
-        "cells": _cells(ws, wb_value[ws.title], default_font),
+        "cells": _cells(ws, wb_value[ws.title], default_font, epoch),
         "merges": sorted(str(m) for m in ws.merged_cells.ranges),
         "conditional_formatting": _conditional_formatting(ws),
         "data_validation": _data_validation(ws),
@@ -510,7 +566,8 @@ def take_snapshot(path: str | Path) -> dict:
         ws = wb_formula[name]
         sheets[name] = _sheet_snapshot(ws, index, wb_value,
                                        ignored_errors=suppressed.get(name),
-                                       default_font=default_font)
+                                       default_font=default_font,
+                                       epoch=wb_formula.epoch)
 
     defined_names = {}
     for name, dn in wb_formula.defined_names.items():

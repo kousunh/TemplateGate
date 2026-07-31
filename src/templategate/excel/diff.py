@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from openpyxl.utils import get_column_letter
+
 from ..core.model import (
     ATTR_CONDITIONAL_FORMATTING,
     ATTR_DATA_VALIDATION,
@@ -161,6 +163,52 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
     return changes
 
 
+def _at(anchor) -> str:
+    """An image anchor as a cell reference a reader can find."""
+    if not anchor:
+        return "an unanchored position"
+    column, row = anchor
+    return f"{get_column_letter(int(column) + 1)}{int(row) + 1}"
+
+
+def _diff_images(sheet: str, gone: set, arrived: set) -> list[Change]:
+    """Image differences, saying *moved* when the picture itself is the same.
+
+    The same picture at a new anchor arrives here as one removal and one
+    addition carrying identical content hashes.  Reporting both is two lines
+    that look like a replacement and read as if the picture might be gone;
+    what actually happened is that someone nudged it.
+    """
+    changes: list[Change] = []
+    before = {sha: (anchor, size) for sha, anchor, size in gone}
+    after = {sha: (anchor, size) for sha, anchor, size in arrived}
+    for sha in sorted(before.keys() & after.keys()):
+        (old_anchor, old_size), (new_anchor, new_size) = before[sha], after[sha]
+        parts = []
+        if old_anchor != new_anchor:
+            parts.append(f"moved from {_at(old_anchor)} to {_at(new_anchor)}")
+        if old_size != new_size:
+            parts.append(f"resized from {old_size[0]}x{old_size[1]} "
+                         f"to {new_size[0]}x{new_size[1]}")
+        changes.append(Change(
+            f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
+            old={"anchor": old_anchor, "size": old_size},
+            new={"anchor": new_anchor, "size": new_size},
+            detail="same image, " + " and ".join(parts or ["rewritten"])))
+
+    for sha in sorted(before.keys() - after.keys()):
+        anchor, size = before[sha]
+        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
+                              old={"anchor": anchor, "size": size}, new=None,
+                              detail=f"image removed from {_at(anchor)}"))
+    for sha in sorted(after.keys() - before.keys()):
+        anchor, size = after[sha]
+        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
+                              old=None, new={"anchor": anchor, "size": size},
+                              detail=f"image added at {_at(anchor)}"))
+    return changes
+
+
 def _diff_sheet(name: str, b: dict, c: dict, *,
                 include_structure: bool = True) -> list[Change]:
     changes: list[Change] = []
@@ -196,6 +244,13 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
                                   new=new["formula"], detail=detail))
         if old["format"] != new["format"]:
             delta = field_delta(old["format"], new["format"])
+            if "numfmt" in delta:
+                # An absent number format is not "no information", it is
+                # General.  Printing it as "none" would read the same as a
+                # format we merely failed to resolve, which is the one case
+                # that matters most.
+                before, after = delta["numfmt"]
+                delta["numfmt"] = (before or "General", after or "General")
             old_fields, new_fields = delta_values(delta)
             changes.append(Change(loc, ATTR_FORMAT, old=old_fields, new=new_fields,
                                   detail=describe_delta(delta, "cell format changed")))
@@ -224,14 +279,7 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
                tuple(i["size"])) for i in b["images"]}
     c_imgs = {(i["sha256"], tuple(i["anchor"]) if i["anchor"] else None,
                tuple(i["size"])) for i in c["images"]}
-    for sha, anchor, size in sorted(b_imgs - c_imgs):
-        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
-                              old={"anchor": anchor, "size": size}, new=None,
-                              detail="image removed, replaced, moved or resized"))
-    for sha, anchor, size in sorted(c_imgs - b_imgs):
-        changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
-                              old=None, new={"anchor": anchor, "size": size},
-                              detail="image added, replaced, moved or resized"))
+    changes.extend(_diff_images(sheet, b_imgs - c_imgs, c_imgs - b_imgs))
 
     if b.get("protection", ()) != c.get("protection", ()):
         delta = field_delta(b.get("protection"), c.get("protection"))
@@ -251,10 +299,23 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
     b_layout, c_layout = b.get("layout", {}), c.get("layout", {})
     for ref in sorted(b_layout.keys() | c_layout.keys()):
         old, new = b_layout.get(ref), c_layout.get(ref)
-        if old != new:
-            changes.append(Change(f"{sheet}!{ref}", ATTR_LAYOUT,
-                                  old=_short(old), new=_short(new),
-                                  detail="row/column size or visibility changed"))
+        if old == new:
+            continue
+        # A row or column that goes back to its default stops being recorded
+        # at all.  Read as "absent", unhiding a column would report its width
+        # vanishing rather than the thing that actually happened.
+        old_map, new_map = dict(old or ()), dict(new or ())
+        for side in (old_map, new_map):
+            side.setdefault("hidden", False)
+        delta = field_delta(old_map, new_map)
+        old_fields, new_fields = delta_values(delta)
+        detail = describe_delta(delta, "row or column changed")
+        still_hidden = (old_map.get("hidden") and new_map.get("hidden")
+                        and "hidden" not in delta)
+        if still_hidden:
+            detail += " (still hidden)"
+        changes.append(Change(f"{sheet}!{ref}", ATTR_LAYOUT,
+                              old=old_fields, new=new_fields, detail=detail))
 
     b_names, c_names = b.get("defined_names", {}), c.get("defined_names", {})
     for dn in sorted(b_names.keys() | c_names.keys()):
