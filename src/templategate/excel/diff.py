@@ -22,6 +22,7 @@ from ..core.model import (
     Change,
 )
 from ..core.describe import delta_values, describe_delta, field_delta
+from ..core.messages import message
 from ..core.package import diff_packages
 from ..core.selector import quote_sheet
 
@@ -91,16 +92,16 @@ def _is_rename(pair: tuple[str, float] | None) -> bool:
     return pair is not None and pair[1] >= _RENAME_SIMILARITY
 
 
-def _rename_detail(plain: str, renamed: str, pair: tuple[str, float] | None) -> str:
+def _rename_detail(plain: str, renamed: str, pair: tuple[str, float] | None):
     if pair is None:
-        return f"sheet {plain}"
+        return message(f"detail.sheet_{plain}")
     name, _score = pair
     if _is_rename(pair):
-        return f"sheet {renamed} {name!r}"
+        return message(f"detail.sheet_renamed_{renamed}", name=name)
     # Two sheets that merely got paired up so their contents could still be
     # compared.  Calling that a rename would tell the reader a sheet survived
     # under a new name when it was in fact deleted.
-    return f"sheet {plain} (contents compared against {name!r}, which is not a rename)"
+    return message(f"detail.sheet_{plain}_paired", name=name)
 
 
 def diff_snapshots(base: dict, cand: dict) -> list[Change]:
@@ -118,13 +119,13 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
                               old="present",
                               new=pair[0] if _is_rename(pair) else None,
-                              detail=_rename_detail("removed", "renamed to", pair)))
+                              detail=_rename_detail("removed", "to", pair)))
     for name in added:
         pair = renamed_from.get(name)
         changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
                               old=pair[0] if _is_rename(pair) else None,
                               new="present",
-                              detail=_rename_detail("added", "renamed from", pair)))
+                              detail=_rename_detail("added", "from", pair)))
 
     font_defaults = (dict(base.get("settings", ())), dict(cand.get("settings", ())))
     for name in sorted(base_sheets.keys() & cand_sheets.keys()):
@@ -147,18 +148,20 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
 
     if base.get("format") != cand.get("format"):
         old_format, new_format = base.get("format"), cand.get("format")
-        detail = f"workbook saved as .{new_format} instead of .{old_format}"
-        if old_format == "xlsm" and new_format == "xlsx":
-            detail += "; a macro-enabled workbook saved as .xlsx loses its VBA project"
-        changes.append(Change("workbook#format", ATTR_SHEET_SETTINGS,
-                              old=old_format, new=new_format, detail=detail))
+        lost_vba = old_format == "xlsm" and new_format == "xlsx"
+        changes.append(Change(
+            "workbook#format", ATTR_SHEET_SETTINGS,
+            old=old_format, new=new_format,
+            detail=message("detail.format_changed_vba" if lost_vba
+                           else "detail.format_changed",
+                           old=old_format, new=new_format)))
 
     if base.get("settings", ()) != cand.get("settings", ()):
         delta = field_delta(base.get("settings"), cand.get("settings"))
         old_fields, new_fields = delta_values(delta)
         changes.append(Change("workbook#settings", ATTR_SHEET_SETTINGS,
                               old=old_fields, new=new_fields,
-                              detail=describe_delta(delta, "workbook settings changed")))
+                              detail=describe_delta(delta, "detail.workbook_settings")))
 
     # Charts, pivot tables, shapes, VBA and friends live outside anything
     # openpyxl models, so they are compared straight from the zip.
@@ -179,19 +182,24 @@ def _at(anchor) -> str:
 _EMU_PER_PIXEL = 9525
 
 
-def _size_text(size) -> str:
-    """An image's on-page size, in pixels where the drawing gives us EMU."""
+def _size_text(size):
+    """An image's on-page size, in pixels where the drawing gives us EMU.
+
+    Returns a message rather than a string: this ends up inside the sentence
+    about the image, and has to be spoken in the same language as that
+    sentence rather than the one in force when the diff ran.
+    """
     if not size:
-        return "an unknown size"
+        return message("size.unknown")
     kind = size[0]
     if kind == "emu":
         try:
             width, height = (round(int(value) / _EMU_PER_PIXEL) for value in size[1:3])
-            return f"{width}x{height} pixels"
+            return message("value.pixels", width=width, height=height)
         except (TypeError, ValueError):
-            return "an unreadable size"
+            return message("size.unreadable")
     if kind == "to":
-        return "a different cell span"
+        return message("size.cell_span")
     return "x".join(str(part) for part in size)
 
 
@@ -208,28 +216,38 @@ def _diff_images(sheet: str, gone: set, arrived: set) -> list[Change]:
     after = {sha: (anchor, size) for sha, anchor, size in arrived}
     for sha in sorted(before.keys() & after.keys()):
         (old_anchor, old_size), (new_anchor, new_size) = before[sha], after[sha]
-        parts = []
-        if old_anchor != new_anchor:
-            parts.append(f"moved from {_at(old_anchor)} to {_at(new_anchor)}")
-        if old_size != new_size:
-            parts.append(f"resized from {_size_text(old_size)} "
-                         f"to {_size_text(new_size)}")
+        moved, resized = old_anchor != new_anchor, old_size != new_size
+        # One whole sentence per case rather than clauses joined with "and":
+        # the joining word and the order of the clauses both move between
+        # languages, so a stitched sentence is only ever right in one.
+        if moved and resized:
+            said = message("detail.image_moved_resized",
+                          old_at=_at(old_anchor), new_at=_at(new_anchor),
+                          old=_size_text(old_size), new=_size_text(new_size))
+        elif moved:
+            said = message("detail.image_moved",
+                          old=_at(old_anchor), new=_at(new_anchor))
+        elif resized:
+            said = message("detail.image_resized",
+                          old=_size_text(old_size), new=_size_text(new_size))
+        else:
+            said = message("detail.image_rewritten")
         changes.append(Change(
             f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
             old={"anchor": old_anchor, "size": old_size},
             new={"anchor": new_anchor, "size": new_size},
-            detail="same image, " + " and ".join(parts or ["rewritten"])))
+            detail=said))
 
     for sha in sorted(before.keys() - after.keys()):
         anchor, size = before[sha]
         changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
                               old={"anchor": anchor, "size": size}, new=None,
-                              detail=f"image removed from {_at(anchor)}"))
+                              detail=message("detail.image_removed", where=_at(anchor))))
     for sha in sorted(after.keys() - before.keys()):
         anchor, size = after[sha]
         changes.append(Change(f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
                               old=None, new={"anchor": anchor, "size": size},
-                              detail=f"image added at {_at(anchor)}"))
+                              detail=message("detail.image_added", where=_at(anchor))))
     return changes
 
 
@@ -272,14 +290,14 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         if b.get("kind", "worksheet") != c.get("kind", "worksheet"):
             changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
                                   old=b.get("kind"), new=c.get("kind"),
-                                  detail="sheet kind changed"))
+                                  detail=message("detail.sheet_kind")))
         if b["index"] != c["index"]:
             changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
-                                  old=b["index"], new=c["index"], detail="sheet moved"))
+                                  old=b["index"], new=c["index"], detail=message("detail.sheet_moved")))
         if b["visibility"] != c["visibility"]:
             changes.append(Change(f"sheet:{name}", ATTR_SHEET_STRUCTURE,
                                   old=b["visibility"], new=c["visibility"],
-                                  detail="sheet visibility changed"))
+                                  detail=message("detail.sheet_visibility")))
 
     for coord in sorted(b["cells"].keys() | c["cells"].keys()):
         old = b["cells"].get(coord, _DEFAULT_CELL)
@@ -288,14 +306,15 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         if old["value"] != new["value"]:
             changes.append(Change(loc, ATTR_VALUE, old=old["value"], new=new["value"]))
         if old["formula"] != new["formula"]:
-            detail = ""
+            said = ""
             if old["formula"] and not new["formula"]:
                 # The archetypal damage: =SUM(B2:B4) becomes 1750.  It still
                 # shows the right number today and stops being a total.
-                detail = ("formula replaced by a hardcoded value "
-                          f"({_readable(old['formula'])} -> {_readable(new['value'])})")
+                said = message("detail.formula_hardcoded",
+                               old=_readable(old["formula"]),
+                               new=_readable(new["value"]))
             changes.append(Change(loc, ATTR_FORMULA, old=old["formula"],
-                                  new=new["formula"], detail=detail))
+                                  new=new["formula"], detail=said))
         if old["format"] != new["format"]:
             delta = field_delta(old["format"], new["format"])
             _resolve_inherited_fonts(delta, font_defaults)
@@ -310,16 +329,16 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
                 delta["numfmt"] = (before or "General", after or "General")
             old_fields, new_fields = delta_values(delta)
             changes.append(Change(loc, ATTR_FORMAT, old=old_fields, new=new_fields,
-                                  detail=describe_delta(delta, "cell format changed")))
+                                  detail=describe_delta(delta, "detail.cell_format")))
 
     for merged in sorted(set(b["merges"]) - set(c["merges"])):
         changes.append(Change(f"{sheet}!{merged}", ATTR_MERGE,
                               old="merged", new=None,
-                              detail="cells unmerged (the block splits back apart)"))
+                              detail=message("detail.unmerged")))
     for merged in sorted(set(c["merges"]) - set(b["merges"])):
         changes.append(Change(f"{sheet}!{merged}", ATTR_MERGE,
                               old=None, new="merged",
-                              detail="cells merged (only the top-left value survives)"))
+                              detail=message("detail.merged")))
 
     for attr, key in ((ATTR_CONDITIONAL_FORMATTING, "conditional_formatting"),
                       (ATTR_DATA_VALIDATION, "data_validation")):
@@ -344,14 +363,14 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         changes.append(Change(f"{sheet}#protection", ATTR_PROTECTION,
                               old=old_fields or _short(b.get("protection")),
                               new=new_fields or _short(c.get("protection")),
-                              detail=describe_delta(delta, "sheet protection changed")))
+                              detail=describe_delta(delta, "detail.sheet_protection")))
 
     if b.get("settings", ()) != c.get("settings", ()):
         delta = field_delta(b.get("settings"), c.get("settings"))
         old_fields, new_fields = delta_values(delta)
         changes.append(Change(f"{sheet}#settings", ATTR_SHEET_SETTINGS,
                               old=old_fields, new=new_fields,
-                              detail=describe_delta(delta, "sheet settings changed")))
+                              detail=describe_delta(delta, "detail.sheet_settings")))
 
     b_layout, c_layout = b.get("layout", {}), c.get("layout", {})
     for ref in sorted(b_layout.keys() | c_layout.keys()):
@@ -366,13 +385,13 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
             side.setdefault("hidden", False)
         delta = field_delta(old_map, new_map)
         old_fields, new_fields = delta_values(delta)
-        detail = describe_delta(delta, "row or column changed")
+        said = describe_delta(delta, "detail.row_column")
         still_hidden = (old_map.get("hidden") and new_map.get("hidden")
                         and "hidden" not in delta)
         if still_hidden:
-            detail += " (still hidden)"
+            said = message("detail.still_hidden", body=said)
         changes.append(Change(f"{sheet}!{ref}", ATTR_LAYOUT,
-                              old=old_fields, new=new_fields, detail=detail))
+                              old=old_fields, new=new_fields, detail=said))
 
     b_names, c_names = b.get("defined_names", {}), c.get("defined_names", {})
     for dn in sorted(b_names.keys() | c_names.keys()):
@@ -380,19 +399,19 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         if old != new:
             changes.append(Change(f"name:{sheet}!{dn}", ATTR_DEFINED_NAMES,
                                   old=old, new=new,
-                                  detail="sheet-scoped defined name changed"))
+                                  detail=message("detail.defined_name_sheet")))
 
     if b["header_footer"] != c["header_footer"]:
         changes.append(Change(f"{sheet}#header_footer", ATTR_HEADER_FOOTER,
                               old=b["header_footer"], new=c["header_footer"]))
 
     if b["print"] != c["print"]:
-        detail = ", ".join(sorted(
+        fields = ", ".join(sorted(
             k for k in b["print"].keys() | c["print"].keys()
             if b["print"].get(k) != c["print"].get(k)
         ))
         changes.append(Change(f"{sheet}#print", ATTR_PRINT_SETTINGS,
-                              detail=f"print settings changed: {detail}"))
+                              detail=message("detail.print_settings_fields", fields=fields)))
     return changes
 
 

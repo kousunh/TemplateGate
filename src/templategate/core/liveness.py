@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 
+from .messages import message
 from .policy import Policy
 from .selector import normalize
 
@@ -30,13 +31,14 @@ _PARAGRAPH = re.compile(r"p(\d+)(?:-(\d+))?$")
 _INDEXED = re.compile(r"(table|sdt|textbox|section)(\d+)")
 
 
-def _listed(names) -> str:
+def _listed(names):
     shown = sorted(names)
     if not shown:
-        return "the document has none"
+        return message("liveness.listed_none")
     if len(shown) > 6:
-        return "document has " + ", ".join(repr(n) for n in shown[:6]) + ", ..."
-    return "document has " + ", ".join(repr(n) for n in shown)
+        return message("liveness.listed_more",
+                       names=", ".join(repr(n) for n in shown[:6]))
+    return message("liveness.listed", names=", ".join(repr(n) for n in shown))
 
 
 def _excel_complaint(selector: str, snapshot: dict) -> str | None:
@@ -53,7 +55,8 @@ def _excel_complaint(selector: str, snapshot: dict) -> str | None:
         return None
     if separator == "" and selector != sheet:
         return None
-    return f"no sheet named {sheet!r}; {_listed(sheets)}"
+    return message("liveness.no_sheet", sheet=sheet,
+                   listed=_listed(sheets))
 
 
 def _word_complaint(selector: str, snapshot: dict) -> str | None:
@@ -62,8 +65,9 @@ def _word_complaint(selector: str, snapshot: dict) -> str | None:
     if match:
         low = int(match.group(1))
         if low > paragraphs:
-            return (f"the document has {paragraphs} body paragraph"
-                    f"{'' if paragraphs == 1 else 's'}, so p{low} does not exist")
+            return message("liveness.no_paragraph.one" if paragraphs == 1
+                           else "liveness.no_paragraph.many",
+                           available=paragraphs, wanted=low)
         return None
 
     match = _INDEXED.fullmatch(selector)
@@ -78,8 +82,9 @@ def _word_complaint(selector: str, snapshot: dict) -> str | None:
                            if key.startswith("textbox")),
         }[kind]
         if index > available:
-            return (f"the document has {available} {kind}"
-                    f"{'' if available == 1 else 's'}, so {kind}{index} does not exist")
+            return message("liveness.no_indexed.one" if available == 1
+                           else "liveness.no_indexed.many",
+                           available=available, kind=kind, wanted=index)
     return None
 
 
@@ -101,7 +106,7 @@ def policy_warnings(policy: Policy, baseline: dict) -> list[str]:
         for number, rule in enumerate(rules, start=1):
             complaint = _complaint(rule.selector, baseline)
             if complaint:
-                messages.append(
-                    f"{kind} rule {number} selector {rule.selector!r} "
-                    f"matches nothing in the baseline: {complaint}")
+                messages.append(message("liveness.dead_rule", kind=kind,
+                                        number=number, selector=rule.selector,
+                                        complaint=complaint))
     return messages

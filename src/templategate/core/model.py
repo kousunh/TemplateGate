@@ -108,8 +108,10 @@ class Change:
     # paragraph that shifted up behind it.  Evaluation ignores this: each
     # change is still judged on its own.
     group: str = ""
-
     def to_dict(self) -> dict:
+        # ``detail`` and ``group`` may be Detail instances, which are strings
+        # carrying the message id that produced them.  They serialise as the
+        # English text they already are, so the JSON contract is untouched.
         return asdict(self)
 
 

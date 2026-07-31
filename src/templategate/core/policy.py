@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from .messages import message
 from .model import ALL_ATTRIBUTES, STRUCTURAL_ATTRIBUTES
 
 VALID_TARGETS = ("excel", "word", "auto")
@@ -49,15 +50,17 @@ def _did_you_mean(word: str, known) -> str:
     """
     close = difflib.get_close_matches(word, sorted(known), n=1, cutoff=0.7)
     if close:
-        return f" — did you mean {close[0]!r}?"
-    return f" (valid: {', '.join(sorted(known))})"
+        return message("policy.did_you_mean", suggestion=close[0])
+    return message("policy.valid_are", options=", ".join(sorted(known)))
 
 
 def _check_known(word: str, known, *, what: str, context: str = "") -> None:
     if word in known:
         return
-    where = f"{context}: " if context else ""
-    raise PolicyError(f"{where}unknown {what} {word!r}{_did_you_mean(word, known)}")
+    raise PolicyError(message("policy.unknown",
+                              where=f"{context}: " if context else "",
+                              what=message(f"policy.word.{what}"),
+                              word=word, hint=_did_you_mean(word, known)))
 
 
 @dataclass
@@ -70,14 +73,14 @@ class Rule:
         if isinstance(obj, str):
             return cls(selector=obj)
         if not isinstance(obj, dict):
-            raise PolicyError(f"{context}: each rule must be a string or a mapping")
+            raise PolicyError(message("policy.rule_shape", context=context))
         for key in obj:
             _check_known(str(key), VALID_RULE_KEYS, what="key", context=context)
         attrs = obj.get("attributes", ["*"])
         if isinstance(attrs, str):
             attrs = [attrs]
         if not isinstance(attrs, list) or not all(isinstance(a, str) for a in attrs):
-            raise PolicyError(f"{context}: 'attributes' must be a list of strings")
+            raise PolicyError(message("policy.attributes_shape", context=context))
         for attribute in attrs:
             if attribute == "*":
                 continue
@@ -116,50 +119,51 @@ def load_policy(path: str | Path) -> Policy:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise PolicyError(f"policy file not found: {path}")
+        raise PolicyError(message("policy.not_found", path=path))
     except yaml.YAMLError as exc:
-        raise PolicyError(f"invalid YAML in {path}: {exc}")
+        raise PolicyError(message("policy.bad_yaml", path=path, reason=exc))
     if not isinstance(raw, dict):
-        raise PolicyError(f"{path}: policy root must be a mapping")
+        raise PolicyError(message("policy.root_shape", path=path))
     return parse_policy(raw, source_path=str(path))
 
 
 def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
     for key in raw:
-        _check_known(str(key), VALID_KEYS, what="policy key")
+        _check_known(str(key), VALID_KEYS, what="policy_key")
 
     target = str(raw.get("target", "auto")).lower()
     if target not in VALID_TARGETS:
-        raise PolicyError(f"target: {target!r} is not a target"
-                          f"{_did_you_mean(target, VALID_TARGETS)}")
+        raise PolicyError(message("policy.bad_target", value=target,
+                                  hint=_did_you_mean(target, VALID_TARGETS)))
     mode = str(raw.get("mode", "normal_input"))
     if mode not in VALID_MODES:
-        raise PolicyError(f"mode: {mode!r} is not a mode"
-                          f"{_did_you_mean(mode, VALID_MODES)}")
+        raise PolicyError(message("policy.bad_mode", value=mode,
+                                  hint=_did_you_mean(mode, VALID_MODES)))
 
     allow = [Rule.from_obj(o, context="allow") for o in _as_list(raw.get("allow"), "allow")]
     protect = [Rule.from_obj(o, context="protect") for o in _as_list(raw.get("protect"), "protect")]
 
     structural = raw.get("structural", {}) or {}
     if not isinstance(structural, dict):
-        raise PolicyError("'structural' must be a mapping")
+        raise PolicyError(message("policy.structural_shape"))
     for key, value in structural.items():
-        _check_known(str(key), STRUCTURAL_ATTRIBUTES, what="structural key")
+        _check_known(str(key), STRUCTURAL_ATTRIBUTES, what="structural_key")
         if str(value).lower() not in VALID_STRUCTURAL_VALUES:
-            raise PolicyError(
-                f"structural.{key}: {value!r} is not a setting"
-                f"{_did_you_mean(str(value).lower(), VALID_STRUCTURAL_VALUES)}")
+            raise PolicyError(message(
+                "policy.bad_structural", key=key, value=value,
+                hint=_did_you_mean(str(value).lower(),
+                                   VALID_STRUCTURAL_VALUES)))
 
     sem_raw = raw.get("semantic", {}) or {}
     if not isinstance(sem_raw, dict):
-        raise PolicyError("'semantic' must be a mapping")
+        raise PolicyError(message("policy.semantic_shape"))
     for key in sem_raw:
         _check_known(str(key), VALID_SEMANTIC_KEYS, what="key", context="semantic")
     sem_mode = str(sem_raw.get("mode", "off")).lower()
     if sem_mode not in VALID_SEMANTIC_MODES:
-        raise PolicyError(
-            f"semantic.mode: {sem_mode!r} is not a mode"
-            f"{_did_you_mean(sem_mode, VALID_SEMANTIC_MODES)}")
+        raise PolicyError(message(
+            "policy.bad_semantic_mode", value=sem_mode,
+            hint=_did_you_mean(sem_mode, VALID_SEMANTIC_MODES)))
     checks = _as_list(sem_raw.get("checks"), "semantic.checks")
     norm_checks: list[str] = []
     for c in checks:
@@ -168,7 +172,7 @@ def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
         elif isinstance(c, dict) and "instruction" in c:
             norm_checks.append(str(c["instruction"]))
         else:
-            raise PolicyError("semantic.checks entries must be strings or {instruction: ...}")
+            raise PolicyError(message("policy.bad_check"))
     semantic = SemanticConfig(
         mode=sem_mode,
         provider=str(sem_raw.get("provider", "command")),
@@ -193,7 +197,7 @@ def _as_list(value, name: str) -> list:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise PolicyError(f"'{name}' must be a list")
+        raise PolicyError(message("policy.must_be_list", name=name))
     return value
 
 

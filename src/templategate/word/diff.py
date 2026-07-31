@@ -32,6 +32,7 @@ from ..core.model import (
     Change,
 )
 from ..core.describe import as_mapping, delta_values, describe_delta, field_delta
+from ..core.messages import message
 from ..core.package import diff_packages
 
 
@@ -39,7 +40,7 @@ def _merged_runs(formats) -> dict:
     """Fold a block's run formats into one property -> values map.
 
     A paragraph holds a set of run formats; naming the properties that differ
-    across the whole set is what turns "run formatting changed" into
+    across the whole set is what turns "detail.run_format" into
     "size '24' -> '8', color none -> 'FFFFFF'".
     """
     merged: dict[str, set] = {}
@@ -94,13 +95,13 @@ def _paragraph_attrs(loc: str, old: dict, new: dict) -> list[Change]:
     if delta:
         old_fields, new_fields = delta_values(delta)
         changes.append(Change(loc, ATTR_FORMAT, old=old_fields, new=new_fields,
-                              detail=describe_delta(delta, "run formatting changed")))
+                              detail=describe_delta(delta, "detail.run_format")))
     if old.get("properties") != new.get("properties"):
         delta = field_delta(old.get("properties"), new.get("properties"))
         old_fields, new_fields = delta_values(delta)
         changes.append(Change(loc, ATTR_PARAGRAPH_FORMAT,
                               old=old_fields, new=new_fields,
-                              detail=describe_delta(delta, "paragraph formatting changed")))
+                              detail=describe_delta(delta, "detail.paragraph_format")))
     if old.get("breaks") != new.get("breaks"):
         changes.append(Change(loc, ATTR_PARAGRAPH_FORMAT,
                               old=_breaks_text(old.get("breaks")),
@@ -109,23 +110,23 @@ def _paragraph_attrs(loc: str, old: dict, new: dict) -> list[Change]:
                                                    new.get("breaks"))))
     if old.get("fields") != new.get("fields"):
         changes.append(Change(loc, ATTR_FIELD, old=old.get("fields"),
-                              new=new.get("fields"), detail="field code changed"))
+                              new=new.get("fields"), detail=message("detail.field_code")))
     if old.get("bookmarks") != new.get("bookmarks"):
         changes.append(Change(loc, ATTR_BOOKMARK, old=old.get("bookmarks"),
-                              new=new.get("bookmarks"), detail="bookmarks changed"))
+                              new=new.get("bookmarks"), detail=message("detail.bookmarks")))
     if old.get("revisions") != new.get("revisions"):
         changes.append(Change(loc, ATTR_REVISION, old=old.get("revisions"),
                               new=new.get("revisions"),
-                              detail="tracked-change markup changed"))
+                              detail=message("detail.tracked_markup")))
     if old.get("markup") != new.get("markup"):
         changes.append(Change(loc, ATTR_MARKUP,
                               old=_markup_text(old.get("markup"), new.get("markup")),
                               new=_markup_text(new.get("markup"), old.get("markup")),
-                              detail="markup changed that no other check covers"))
+                              detail=message("detail.markup_other")))
     if old.get("control") != new.get("control"):
         changes.append(Change(loc, ATTR_CONTENT_CONTROL, old=old.get("control"),
                               new=new.get("control"),
-                              detail="content control properties changed"))
+                              detail=message("detail.content_control_props")))
     return changes
 
 
@@ -134,19 +135,19 @@ def _table_attrs(loc: str, old: dict, new: dict) -> list[Change]:
     changes: list[Change] = []
     if old.get("style") != new.get("style"):
         changes.append(Change(loc, ATTR_TABLE, old=old.get("style"),
-                              new=new.get("style"), detail="table style changed"))
+                              new=new.get("style"), detail=message("detail.table_style")))
     if old.get("geometry") != new.get("geometry"):
         delta = field_delta(old.get("geometry"), new.get("geometry"))
         old_fields, new_fields = delta_values(delta)
         changes.append(Change(loc, ATTR_TABLE, old=old_fields, new=new_fields,
                               detail=describe_delta(
-                                  delta, "table widths, borders or shading changed")))
+                                  delta, "detail.table_geometry")))
     o_rows, n_rows = old.get("rows", []), new.get("rows", [])
     o_shape = (len(o_rows), len(o_rows[0]) if o_rows else 0)
     n_shape = (len(n_rows), len(n_rows[0]) if n_rows else 0)
     if o_shape != n_shape:
         changes.append(Change(loc, ATTR_TABLE, old=o_shape, new=n_shape,
-                              detail="table dimensions changed"))
+                              detail=message("detail.table_dimensions")))
     o_fmts, n_fmts = old.get("cell_formats", []), new.get("cell_formats", [])
     o_geom, n_geom = old.get("cell_geometry", []), new.get("cell_geometry", [])
     o_mark, n_mark = old.get("cell_markup", []), new.get("cell_markup", [])
@@ -167,20 +168,20 @@ def _table_attrs(loc: str, old: dict, new: dict) -> list[Change]:
                 changes.append(Change(cell_loc, ATTR_FORMAT,
                                       old=old_fields, new=new_fields,
                                       detail=describe_delta(cell_delta,
-                                                            "run formatting changed")))
+                                                            "detail.run_format")))
             o_markup, n_markup = at(o_mark, r, c), at(n_mark, r, c)
             if o_markup != n_markup:
                 changes.append(Change(cell_loc, ATTR_MARKUP,
                                       old=_markup_text(o_markup, n_markup),
                                       new=_markup_text(n_markup, o_markup),
-                                      detail="markup changed that no other check covers"))
+                                      detail=message("detail.markup_other")))
             geometry_delta = field_delta(at(o_geom, r, c), at(n_geom, r, c))
             if geometry_delta:
                 old_fields, new_fields = delta_values(geometry_delta)
                 changes.append(Change(cell_loc, ATTR_TABLE,
                                       old=old_fields, new=new_fields,
                                       detail=describe_delta(
-                                          geometry_delta, "table cell changed")))
+                                          geometry_delta, "detail.table_cell")))
     return changes
 
 
@@ -195,7 +196,9 @@ def _diff_blocks(base: dict, cand: dict) -> list[Change]:
             changes.append(Change(location, ATTR_TEXT,
                                   old=None if old is None else old.get("text"),
                                   new=None if new is None else new.get("text"),
-                                  detail=f"{kind} {'added' if old is None else 'removed'}"))
+                                  detail=message("detail.block_added" if old is None
+                                                 else "detail.block_removed",
+                                                 kind=kind)))
             continue
         if old.get("kind") == "table" or new.get("kind") == "table":
             changes.extend(_table_attrs(location, old, new))
@@ -209,8 +212,15 @@ def _alignment(b_paras: list, c_paras: list) -> SequenceMatcher:
                            b=[p["text"] for p in c_paras], autojunk=False)
 
 
-def _count(number: int) -> str:
-    return f"{number} paragraph" if number == 1 else f"{number} paragraphs"
+def _count(number: int):
+    """"one paragraph" / "3 paragraphs", counted the way each language does.
+
+    English inflects the noun and Japanese does not, so the singular and the
+    plural are separate messages rather than a suffix stuck on the end.
+    """
+    if number == 1:
+        return message("shift.paragraphs.one")
+    return message("shift.paragraphs.many", count=number)
 
 
 def _shift_report(b_paras: list, c_paras: list) -> tuple[set[int], str]:
@@ -221,24 +231,32 @@ def _shift_report(b_paras: list, c_paras: list) -> tuple[set[int], str]:
     deleted from sixty, every later position differs and the report becomes
     fifty-six lines that hide the single edit that caused them.
     """
-    edits: list[str] = []
+    edits = []
     aligned: dict[int, int] = {}
     for tag, i1, i2, j1, j2 in _alignment(b_paras, c_paras).get_opcodes():
         if tag == "equal":
             for offset in range(i2 - i1):
                 aligned[i1 + offset] = j1 + offset
         elif tag == "delete":
-            edits.append(f"{_count(i2 - i1)} removed at p{i1 + 1}")
+            edits.append(message("shift.removed_at", what=_count(i2 - i1),
+                                 position=i1 + 1))
         elif tag == "insert":
-            edits.append(f"{_count(j2 - j1)} added at p{j1 + 1}")
+            edits.append(message("shift.added_at", what=_count(j2 - j1),
+                                 position=j1 + 1))
         else:
-            edits.append(f"{_count(i2 - i1)} rewritten at p{i1 + 1}")
+            edits.append(message("shift.rewritten_at", what=_count(i2 - i1),
+                                 position=i1 + 1))
     shifted = {index for index, target in aligned.items() if index != target}
-    return shifted, "; ".join(edits)
+    if not edits:
+        return shifted, None
+    return shifted, message("detail.join_passthrough", clauses=edits)
 
 
 def _diff_paragraphs_positional(b_paras: list, c_paras: list) -> list[Change]:
     shifted, summary = _shift_report(b_paras, c_paras)
+    # ``group`` is the English identity consecutive changes are folded by and
+    # a value in the JSON report, so it stays a plain string; the message
+    # beside it is what the reader actually sees.
     group = summary if shifted and summary else ""
     changes: list[Change] = []
     for i in range(max(len(b_paras), len(c_paras))):
@@ -247,18 +265,17 @@ def _diff_paragraphs_positional(b_paras: list, c_paras: list) -> list[Change]:
         new = c_paras[i] if i < len(c_paras) else None
         if old is None:
             changes.append(Change(loc, ATTR_TEXT, old=None, new=new["text"],
-                                  detail="paragraph added"))
+                                  detail=message("detail.paragraph_added")))
             continue
         if new is None:
             changes.append(Change(loc, ATTR_TEXT, old=old["text"], new=None,
-                                  detail="paragraph removed"))
+                                  detail=message("detail.paragraph_removed")))
             continue
         block = _paragraph_attrs(loc, old, new)
         if group and i in shifted:
             for change in block:
                 change.group = group
-                change.detail = (f"content shifted here by an earlier edit "
-                                 f"({summary})")
+                change.detail = message("detail.shifted_here", summary=summary)
         changes.extend(block)
     return changes
 
@@ -333,10 +350,10 @@ def _diff_paragraphs_aligned(b_paras: list, c_paras: list) -> list[Change]:
             new = c_paras[news[k]] if k < len(news) else None
             if old is None:
                 changes.append(Change(f"p{news[k] + 1}", ATTR_TEXT, old=None,
-                                      new=new["text"], detail="paragraph added"))
+                                      new=new["text"], detail=message("detail.paragraph_added")))
             elif new is None:
                 changes.append(Change(f"p{olds[k] + 1}", ATTR_TEXT, old=old["text"],
-                                      new=None, detail="paragraph removed"))
+                                      new=None, detail=message("detail.paragraph_removed")))
             else:
                 changes.extend(_paragraph_attrs(f"p{news[k] + 1}", old, new))
 
@@ -344,7 +361,8 @@ def _diff_paragraphs_aligned(b_paras: list, c_paras: list) -> list[Change]:
         changes.append(Change(
             f"p{new_index + 1}", ATTR_MOVED,
             old=f"p{old_index + 1}", new=f"p{new_index + 1}",
-            detail=f"paragraph moved from p{old_index + 1} to p{new_index + 1}"))
+            detail=message("detail.paragraph_moved", old=f"p{old_index + 1}",
+                           new=f"p{new_index + 1}")))
     return changes
 
 
@@ -366,7 +384,8 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
             changes.append(Change(loc, ATTR_TABLE,
                                   old="present" if old else None,
                                   new="present" if new else None,
-                                  detail="table added" if old is None else "table removed"))
+                                  detail=message("detail.table_added" if old is None
+                                             else "detail.table_removed")))
             continue
         changes.extend(_table_attrs(loc, old, new))
 
@@ -379,7 +398,7 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
         new = c_secs[i] if i < len(c_secs) else None
         if old != new:
             changes.append(Change(loc, ATTR_SECTION, old=old, new=new,
-                                  detail="section/page setup changed"))
+                                  detail=message("detail.section_setup")))
 
     b_hf, c_hf = base["header_footer"], cand["header_footer"]
     for i in range(max(len(b_hf), len(c_hf))):
@@ -420,10 +439,10 @@ def diff_snapshots(base: dict, cand: dict, *, align: bool = False) -> list[Chang
     b_imgs, c_imgs = Counter(base["images"]), Counter(cand["images"])
     for sha in (b_imgs - c_imgs):
         changes.append(Change(f"#image:{sha[:8]}", ATTR_IMAGES, old="present", new=None,
-                              detail="image removed or replaced"))
+                              detail=message("detail.image_removed_replaced")))
     for sha in (c_imgs - b_imgs):
         changes.append(Change(f"#image:{sha[:8]}", ATTR_IMAGES, old=None, new="present",
-                              detail="image added or replaced"))
+                              detail=message("detail.image_added_replaced")))
 
     # Comments, VBA, embedded objects and custom XML are dropped wholesale by
     # python-docx, so they are compared straight from the zip.

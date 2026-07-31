@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from . import __version__
 from .api import check, diff_report, snapshot
 from .core.policy import PolicyError, SAMPLE_POLICY_EXCEL, SAMPLE_POLICY_WORD
+from .core.messages import LANGUAGES, Translator, normalise, say
 from .reporters import RENDERERS
 
 
@@ -71,6 +73,10 @@ def main(argv: list[str] | None = None) -> int:
                          help="write the report to a file instead of stdout")
     p_check.add_argument("--semantic", choices=["off", "review", "gate"],
                          help="override the policy's semantic mode for this run")
+    p_check.add_argument("--lang", choices=list(LANGUAGES),
+                         help="language for the human-readable report "
+                              "(default: en, or TEMPLATEGATE_LANG). "
+                              "The JSON report is always English.")
 
     p_diff = sub.add_parser(
         "diff", help="list every change, with no policy applied",
@@ -84,6 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     p_diff.add_argument("--candidate", required=True, metavar="FILE", help=candidate_help)
     p_diff.add_argument("--json", action="store_true",
                         help="output JSON instead of one line per change")
+    p_diff.add_argument("--lang", choices=list(LANGUAGES),
+                        help="language for the human-readable output "
+                             "(default: en, or TEMPLATEGATE_LANG). "
+                             "--json output is always English.")
 
     p_snap = sub.add_parser(
         "snapshot", help="dump a document's structural snapshot as JSON",
@@ -134,37 +144,63 @@ def main(argv: list[str] | None = None) -> int:
                         help="where to write it (default: templategate.policy.yaml)")
 
     args = parser.parse_args(argv)
+    # Resolved before dispatch so a policy that will not parse is still
+    # complained about in the reader's language.  The exception types and the
+    # exit codes do not move: only the words do.
+    t = Translator(_language(args))
     try:
         return _dispatch(args)
     except PolicyError as exc:
-        print(f"templategate: policy error: {exc}", file=sys.stderr)
+        print(t("cli.policy_error", reason=say(exc.args[0] if exc.args else exc, t)),
+              file=sys.stderr)
         return 2
     except (ValueError, OSError) as exc:
-        print(f"templategate: error: {exc}", file=sys.stderr)
+        print(t("cli.error", reason=say(exc.args[0] if exc.args else exc, t)),
+              file=sys.stderr)
         return 2
+
+
+def _language(args: argparse.Namespace) -> str:
+    """The flag if given, else the environment, else English.
+
+    An environment variable is how a Japanese office sets this once for a
+    whole CI job; the flag has to win so a single run can still be read by
+    somebody else.
+    """
+    chosen = getattr(args, "lang", None)
+    if chosen:
+        return normalise(chosen)
+    return normalise(os.environ.get("TEMPLATEGATE_LANG"))
 
 
 def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "check":
+        lang = _language(args)
+        t = Translator(lang)
         result = check(args.baseline, args.candidate, args.policy,
                        semantic_mode=args.semantic)
         for warning in result.warnings:
-            print(f"templategate: warning: {warning}", file=sys.stderr)
-        report = RENDERERS[args.report](result)
+            print(t("cli.warning", message=say(warning, t)), file=sys.stderr)
+        # The JSON report is a machine contract: it stays English whatever
+        # the reader asked for, so agents and CI parse one stable shape.
+        report = (RENDERERS[args.report](result) if args.report == "json"
+                  else RENDERERS[args.report](result, lang))
         if args.output:
             Path(args.output).write_text(report, encoding="utf-8")
-            print(f"report written to {args.output}")
+            print(t("cli.report_written", path=args.output))
         else:
             print(report)
         return 0 if result.passed else 1
 
     if args.command == "diff":
+        t = Translator(_language(args))
         changes, degraded = diff_report(args.baseline, args.candidate)
         for role, reason in degraded.items():
-            print(f"templategate: warning: the {role} document is damaged: {reason}",
+            print(t("cli.warning", message=t("damaged.line",
+                                             role=t(f"role.{role}"),
+                                             reason=reason)),
                   file=sys.stderr)
-            print("templategate: warning: only its package parts could be "
-                  "compared — cell, paragraph and formatting contents were not",
+            print(t("cli.warning", message=t("damaged.parts_only.long")),
                   file=sys.stderr)
         if args.json:
             print(json.dumps([c.to_dict() for c in changes],
@@ -173,13 +209,14 @@ def _dispatch(args: argparse.Namespace) -> int:
             # Never a bare "no changes" for a document we could not read: the
             # whole point of running diff is to find out what moved, and
             # silence would read as "nothing did".
-            print("no differences among the parts that could be read"
-                  if degraded else "no changes")
+            print(t("cli.no_changes.degraded") if degraded
+                  else t("cli.no_changes"))
         else:
             for c in changes:
                 line = f"{c.location} ({c.attribute}): {c.old!r} -> {c.new!r}"
-                if c.detail:
-                    line += f"  [{c.detail}]"
+                detail = say(c.detail, t)
+                if detail:
+                    line += f"  [{detail}]"
                 print(line)
         return 2 if degraded else 0
 
@@ -188,7 +225,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         text = json.dumps(snap, ensure_ascii=False, indent=2, default=str)
         if args.output:
             Path(args.output).write_text(text, encoding="utf-8")
-            print(f"snapshot written to {args.output}")
+            print(Translator(_language(args))("cli.snapshot_written", path=args.output))
         else:
             print(text)
         return 0

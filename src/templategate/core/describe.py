@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from .messages import DeltaDetail
+
 # Reports are read, not parsed; a wall of tuples helps nobody.
 _MAX_FIELDS = 6
-_MAX_VALUE = 60
 
 
 def as_mapping(value: Any) -> dict[str, Any]:
@@ -49,24 +50,18 @@ def field_delta(old: Any, new: Any) -> dict[str, tuple[Any, Any]]:
     return delta
 
 
-def _short(value: Any) -> str:
-    if value is None:
-        return "none"
-    text = value if isinstance(value, str) else repr(value)
-    return text if len(text) <= _MAX_VALUE else text[:_MAX_VALUE] + "..."
+def describe_delta(delta: Mapping[str, tuple[Any, Any]],
+                   subject_key: str) -> DeltaDetail:
+    """"cell format changed: numfmt '#,##0' -> '#,##0,'".
 
-
-def describe_delta(delta: Mapping[str, tuple[Any, Any]], subject: str) -> str:
-    """"cell format changed: numfmt '#,##0' -> '#,##0,'"."""
-    if not delta:
-        return subject
+    Returns the pieces rather than the sentence: the same delta has to come
+    out as English for the JSON contract and as whatever the reader asked for
+    in the report, and only the caller's locale decides which.
+    """
     names = list(delta)
     shown = names[:_MAX_FIELDS]
-    parts = [f"{name} {_short(delta[name][0])} -> {_short(delta[name][1])}"
-             for name in shown]
-    if len(names) > len(shown):
-        parts.append(f"and {len(names) - len(shown)} more")
-    return f"{subject}: " + ", ".join(parts)
+    fields = [(name, delta[name][0], delta[name][1]) for name in shown]
+    return DeltaDetail(subject_key, fields, len(names) - len(shown))
 
 
 def delta_values(delta: Mapping[str, tuple[Any, Any]]) -> tuple[dict, dict]:

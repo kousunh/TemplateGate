@@ -35,6 +35,7 @@ import zipfile
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
+from .messages import message
 from .model import (
     ATTR_CHARTS,
     ATTR_COMMENTS,
@@ -545,11 +546,11 @@ def diff_part_names(base: dict, cand: dict) -> list[Change]:
     for name in sorted(b_names - c_names):
         changes.append(Change(f"package#{FALLBACK_CATEGORY}:{name}", ATTR_PARTS,
                               old="present", new=None,
-                              detail=f"{name} is missing from the candidate"))
+                              detail=message("detail.part_missing", name=name)))
     for name in sorted(c_names - b_names):
         changes.append(Change(f"package#{FALLBACK_CATEGORY}:{name}", ATTR_PARTS,
                               old=None, new="present",
-                              detail=f"{name} was added to the candidate"))
+                              detail=message("detail.part_arrived", name=name)))
     return changes
 
 
