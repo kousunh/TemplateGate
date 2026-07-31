@@ -53,12 +53,27 @@ Verification has to live outside the agent.
 
 ## Install
 
+TemplateGate is a command-line tool, so install it as one — isolated from your
+project's own dependencies:
+
+```bash
+uv tool install git+https://github.com/kousunh/TemplateGate.git
+```
+
+To use the Python API from your own project instead, add it as a dependency:
+
+```bash
+uv add git+https://github.com/kousunh/TemplateGate.git
+```
+
+Plain pip works too, if you would rather not add a tool:
+
 ```bash
 pip install git+https://github.com/kousunh/TemplateGate.git
 ```
 
-Publishing to PyPI is planned, after which `pip install templategate` will be
-the install command. Until then, install from the repository.
+Publishing to PyPI is planned. After that the `git+https://...` URL becomes
+just `templategate` in any of the three commands above.
 
 Requires Python 3.10+. No Office installation and no network access are needed
 to run a check. Dependencies: openpyxl, python-docx (which brings lxml),

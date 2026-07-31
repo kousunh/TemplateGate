@@ -7,6 +7,14 @@ Thanks for your interest in TemplateGate. Issues and pull requests are welcome.
 ```bash
 git clone https://github.com/kousunh/TemplateGate.git
 cd TemplateGate
+uv venv
+uv pip install -e ".[dev]"
+uv run python -m pytest -q
+```
+
+Or with the standard library tooling, if you would rather not use uv:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
 python -m pip install -e ".[dev]"

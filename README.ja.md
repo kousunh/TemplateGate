@@ -50,13 +50,28 @@ Claude Code・Codex・ChatGPT などのAIエージェントは Excel / Word の�
 
 ## インストール
 
+TemplateGate はコマンドラインツールです。プロジェクトの依存関係から隔離した
+形でインストールするのが基本です:
+
+```bash
+uv tool install git+https://github.com/kousunh/TemplateGate.git
+```
+
+自分のプロジェクトから Python API として使う場合は、依存パッケージとして
+追加します:
+
+```bash
+uv add git+https://github.com/kousunh/TemplateGate.git
+```
+
+ツールを増やしたくない場合は、pip でも同じことができます:
+
 ```bash
 pip install git+https://github.com/kousunh/TemplateGate.git
 ```
 
-PyPI への公開は予定されており、公開後は `pip install templategate` が
-インストールコマンドになります。それまではリポジトリからインストール
-してください。
+PyPI への公開は予定されています。公開後は、上記いずれのコマンドでも
+`git+https://...` の部分が単に `templategate` になります。
 
 Python 3.10+。検査の実行に Office のインストールもネットワーク接続も
 不要です。依存パッケージ: openpyxl / python-docx(lxml を伴う)/
