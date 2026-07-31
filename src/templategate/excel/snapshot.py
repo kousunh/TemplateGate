@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import posixpath
+import re
 import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.styles.numbers import is_date_format
+from openpyxl.utils.cell import column_index_from_string
 from openpyxl.utils.datetime import from_excel
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
 from openpyxl.worksheet.worksheet import Worksheet
@@ -55,9 +59,14 @@ def number_format_of(cell) -> str:
         return resolved
     if not format_id:  # id 0 really is General
         return GENERAL_FORMAT
-    hint = _LOCALE_BUILTIN_HINTS.get(format_id)
-    if hint:
-        return f"builtin:{format_id} ({hint})"
+    documented = _LOCALE_BUILTIN_HINTS.get(format_id)
+    if documented:
+        # Return the format code itself rather than the id.  A file may carry
+        # 「2026年7月1日」 as builtin 31 or as that same code written out — one
+        # is Excel's shorthand for the other, and openpyxl converts between
+        # them on save.  Comparing the code makes the two spellings equal
+        # while still telling 31 (西暦) apart from 27 (元号).
+        return documented
     return f"builtin:{format_id} (unresolved)"
 
 
@@ -257,13 +266,20 @@ def _populated(ws):
     return [grid[key] for key in sorted(grid)]
 
 
-def _as_date_if_locale_builtin(cell, value, epoch):
-    """Convert a serial number openpyxl left alone because it could not read
-    the format.  Without this, changing only the format changes the *value*."""
+def _as_date_if_serial(cell, value, epoch):
+    """Convert a serial number when the cell's format says it is a date.
+
+    Two reasons this lives here rather than in the reader.  Cached formula
+    results now come straight from the sheet XML as bare numbers, so the
+    conversion openpyxl's data_only load used to perform has to happen
+    somewhere; and the locale-reserved builtin ids (27-36, 50-58) are dates
+    that openpyxl cannot resolve at all, so without this a change of *format*
+    would show up as a change of *value*.
+    """
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return value
     format_id = getattr(getattr(cell, "_style", None), "numFmtId", None)
-    if format_id not in _LOCALE_BUILTIN_DATE_IDS:
+    if format_id not in _LOCALE_BUILTIN_DATE_IDS and not _formats_as_date(cell):
         return value
     try:
         return from_excel(value, epoch)
@@ -271,10 +287,19 @@ def _as_date_if_locale_builtin(cell, value, epoch):
         return value
 
 
-def _cells(ws_formula, ws_value, default_font: tuple = (None, None),
+def _formats_as_date(cell) -> bool:
+    """A cell with a dangling style index has no format to read, and that is
+    a damaged file's problem, not a reason to fail the snapshot."""
+    try:
+        return bool(is_date_format(cell.number_format))
+    except Exception:
+        return False
+
+
+def _cells(ws_formula, cached_values, default_font: tuple = (None, None),
            epoch=None) -> dict:
     cells: dict[str, dict] = {}
-    value_grid = getattr(ws_value, "_cells", {})
+    value_grid = cached_values or {}
     for cell in _populated(ws_formula):
         formula = _formula_of(cell.value)
         runs = _rich_runs(cell.value)
@@ -282,11 +307,10 @@ def _cells(ws_formula, ws_value, default_font: tuple = (None, None),
         if runs is not None:
             fmt = (fmt or ()) + (("runs", runs),)
         if formula:
-            cached_cell = value_grid.get((cell.row, cell.column))
-            cached = cached_cell.value if cached_cell is not None else None
+            cached = value_grid.get((cell.row, cell.column))
         else:
             cached = cell.value
-        cached = _plain(_as_date_if_locale_builtin(cell, cached, epoch))
+        cached = _plain(_as_date_if_serial(cell, cached, epoch))
         if cached is None and formula is None and fmt is None:
             continue
         cells[cell.coordinate] = {
@@ -473,7 +497,7 @@ _EMPTY_SHEET = {
 }
 
 
-def _sheet_snapshot(ws, index: int, wb_value, *,
+def _sheet_snapshot(ws, index: int, cached_values, *,
                     ignored_errors: str | None = None,
                     default_font: tuple = (None, None),
                     epoch=None,
@@ -494,7 +518,7 @@ def _sheet_snapshot(ws, index: int, wb_value, *,
         return {**common, **_EMPTY_SHEET}
     return {
         **common,
-        "cells": _cells(ws, wb_value[ws.title], default_font, epoch),
+        "cells": _cells(ws, cached_values, default_font, epoch),
         "merges": sorted(str(m) for m in ws.merged_cells.ranges),
         "conditional_formatting": _conditional_formatting(ws),
         "data_validation": _data_validation(ws),
@@ -531,10 +555,17 @@ def _relationship_targets(zf, part: str) -> dict[str, str]:
     root = ElementTree.fromstring(zf.read(rels_part))
     targets = {}
     for relationship in root.iter(_PKG_REL_NS + "Relationship"):
-        target = relationship.get("Target", "").lstrip("/")
-        if target and not target.startswith(("xl/", "word/", "customXml/")):
-            target = f"{folder}/{target}"
-        targets[relationship.get("Id")] = target
+        target = relationship.get("Target", "")
+        if not target:
+            continue
+        if target.startswith("/"):
+            resolved = target.lstrip("/")
+        else:
+            # Relative to the part's own folder, and Excel writes plenty of
+            # "../drawings/drawing1.xml" — the parent segments have to be
+            # resolved or the lookup silently finds nothing.
+            resolved = posixpath.normpath(posixpath.join(folder, target))
+        targets[relationship.get("Id")] = resolved
     return targets
 
 
@@ -553,6 +584,90 @@ def _sheet_parts(zf) -> dict[str, str]:
         if part and part in names:
             found[sheet.get("name", "")] = part
     return found
+
+
+def _shared_strings(zf) -> list[str]:
+    import xml.etree.ElementTree as ElementTree
+
+    if "xl/sharedStrings.xml" not in zf.namelist():
+        return []
+    root = ElementTree.fromstring(zf.read("xl/sharedStrings.xml"))
+    return ["".join(node.text or "" for node in si.iter(_MAIN_NS + "t"))
+            for si in root.iter(_MAIN_NS + "si")]
+
+
+def _cached_scalar(cell, text: str | None, shared: list[str]):
+    """One stored value, typed the way the ``t`` attribute says it is."""
+    if text is None:
+        return None
+    kind = cell.get("t") or "n"
+    if kind == "n":
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        return int(number) if number.is_integer() else number
+    if kind == "b":
+        return text == "1"
+    if kind == "s":
+        try:
+            return shared[int(text)]
+        except (ValueError, IndexError):
+            return None
+    # "str" (a formula's text result), "e" (an error) and "d" (an ISO date)
+    # are already the string they claim to be.
+    return text
+
+
+def _cached_values(path: Path) -> dict[str, dict[tuple[int, int], object]]:
+    """Cached formula results, read straight from each worksheet part.
+
+    openpyxl's ``data_only`` load is the only reader in the pipeline that
+    trips over whitespace between tags, and it used to be load-or-nothing:
+    one pretty-printed worksheet — from a hand-rolled writer, an XSLT step,
+    or somebody's unzip/format/rezip debugging round trip — made the whole
+    file un-comparable at cell level.  These values are simple enough to read
+    directly, so the gate no longer needs that load at all and a
+    pretty-printed workbook is compared like any other.
+
+    Only formula cells are collected: everything else already has its value
+    from the formula workbook.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    grids: dict[str, dict[tuple[int, int], object]] = {}
+    with zipfile.ZipFile(path) as zf:
+        shared = _shared_strings(zf)
+        for name, part in _sheet_parts(zf).items():
+            grid: dict[tuple[int, int], object] = {}
+            root = ElementTree.fromstring(zf.read(part))
+            for cell in root.iter(_MAIN_NS + "c"):
+                reference = cell.get("r")
+                if not reference or cell.find(_MAIN_NS + "f") is None:
+                    continue
+                position = _cell_position(reference)
+                if position is None:
+                    continue
+                stored = cell.find(_MAIN_NS + "v")
+                if stored is not None:
+                    grid[position] = _cached_scalar(cell, stored.text, shared)
+                    continue
+                inline = cell.find(_MAIN_NS + "is")
+                grid[position] = (
+                    "".join(node.text or "" for node in inline.iter(_MAIN_NS + "t"))
+                    if inline is not None else None)
+            grids[name] = grid
+    return grids
+
+
+_CELL_REFERENCE = re.compile(r"^\$?([A-Za-z]{1,3})\$?([1-9][0-9]{0,6})$")
+
+
+def _cell_position(reference: str) -> tuple[int, int] | None:
+    match = _CELL_REFERENCE.match(reference)
+    if match is None:
+        return None
+    return int(match.group(2)), column_index_from_string(match.group(1))
 
 
 def _marker(anchor, tag: str):
@@ -667,7 +782,7 @@ def _calc_mode(workbook) -> str:
 def take_snapshot(path: str | Path) -> dict:
     path = Path(path)
     wb_formula = load_workbook(path, data_only=False, rich_text=True)
-    wb_value = load_workbook(path, data_only=True)
+    cached = _cached_values(path)
 
     suppressed = _ignored_errors(path)
     default_font = _default_font(wb_formula)
@@ -675,7 +790,7 @@ def take_snapshot(path: str | Path) -> dict:
     sheets: dict[str, dict] = {}
     for index, name in enumerate(wb_formula.sheetnames):
         ws = wb_formula[name]
-        sheets[name] = _sheet_snapshot(ws, index, wb_value,
+        sheets[name] = _sheet_snapshot(ws, index, cached.get(name),
                                        ignored_errors=suppressed.get(name),
                                        default_font=default_font,
                                        epoch=wb_formula.epoch,

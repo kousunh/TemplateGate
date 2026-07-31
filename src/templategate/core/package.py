@@ -460,28 +460,68 @@ def package_problem(path: str | Path) -> str | None:
     agree about which one wins — Excel and Word may open a different document
     than the one the gate inspected.  A file like that cannot be checked, only
     refused; guessing would mean signing off on a document nobody can pin down.
+
+    The same reasoning applies one level in, to a Word document carrying more
+    than one body.
     """
     try:
         with zipfile.ZipFile(path) as zf:
             names = [info.filename for info in zf.infolist()
                      if not info.filename.endswith("/")]
+
+            counts = Counter(names)
+            duplicates = sorted(name for name, count in counts.items() if count > 1)
+            if duplicates:
+                first = duplicates[0]
+                extra = (f" (and {len(duplicates) - 1} other duplicated parts)"
+                         if len(duplicates) > 1 else "")
+                return (f"package contains {counts[first]} copies of {first}{extra}; "
+                        "different readers may open different documents")
+
+            for name in names:
+                reason = _escapes_root(name)
+                if reason is not None:
+                    return (f"package contains a part outside the package root "
+                            f"({reason}): {name}")
+
+            return _ambiguous_document_body(zf)
     except Exception:
         return None  # not a readable container: reported elsewhere
 
-    counts = Counter(names)
-    duplicates = sorted(name for name, count in counts.items() if count > 1)
-    if duplicates:
-        first = duplicates[0]
-        extra = (f" (and {len(duplicates) - 1} other duplicated parts)"
-                 if len(duplicates) > 1 else "")
-        return (f"package contains {counts[first]} copies of {first}{extra}; "
-                "different readers may open different documents")
 
-    for name in names:
-        reason = _escapes_root(name)
-        if reason is not None:
-            return (f"package contains a part outside the package root "
-                    f"({reason}): {name}")
+_WORD_MAIN_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _ambiguous_document_body(zf) -> str | None:
+    """Why this Word document has no single body, or None.
+
+    A ``w:document`` holds exactly one ``w:body``.  A file carrying two is
+    schema-invalid, and readers do not agree about it: python-docx and the
+    XML walker both take the first and never look further, so a second body's
+    text — a payment amount, a liability clause — is invisible to the gate
+    while another reader may well show it.  That is the same ambiguity as a
+    zip with duplicate members, and it gets the same answer: refuse, because
+    a document whose content depends on who opens it cannot be checked.
+
+    Counting direct children rather than scanning for the tag keeps this
+    honest about namespace prefixes, which an attacker would otherwise vary.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    if "word/document.xml" not in zf.namelist():
+        return None
+    try:
+        root = ElementTree.fromstring(zf.read("word/document.xml"))
+    except Exception:
+        return None  # unparseable: damage, reported by the snapshot layer
+
+    bodies = [child for child in root if child.tag == _WORD_MAIN_NS + "body"]
+    if len(bodies) > 1:
+        return (f"word/document.xml contains {len(bodies)} <w:body> elements; "
+                "different readers may render different documents")
+    if bodies and (bodies[0].tail or "").strip():
+        return ("word/document.xml carries text after </w:body>; "
+                "different readers may render different documents")
     return None
 
 

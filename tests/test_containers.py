@@ -233,3 +233,119 @@ def test_a_cell_gaining_a_style_reports_only_what_it_set(tmp_path):
               if c.attribute == "format"][0]
     assert list(change.new) == ["font.bold"]
     assert "none -> none" not in change.detail
+
+
+# --- a Word document with more than one body -----------------------------
+
+def _reshaped_document(source, destination, transform):
+    from generate import rewrite_zip
+
+    with zipfile.ZipFile(source) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+    rewrite_zip(source, destination,
+                add={"word/document.xml": transform(xml).encode("utf-8")})
+    return destination
+
+
+SECOND_BODY = ("</w:body><w:body><w:p><w:r>"
+               "<w:t>Payment due: USD 25 only.</w:t></w:r></w:p></w:body>")
+
+
+@pytest.fixture
+def two_bodies(fixtures, tmp_path):
+    return _reshaped_document(
+        fixtures["word_baseline"], tmp_path / "two_bodies.docx",
+        lambda xml: xml.replace("</w:body>", SECOND_BODY, 1))
+
+
+def test_a_second_body_hides_content_from_every_reader_we_have(two_bodies):
+    """The premise: this is why the file has to be refused rather than read.
+
+    Both the XML walker and python-docx stop at the first body, so the second
+    body's text is invisible to the gate while another reader may show it.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    import docx
+
+    from templategate.word.content import W
+
+    with zipfile.ZipFile(two_bodies) as zf:
+        document = zf.read("word/document.xml")
+    assert b"Payment due" in document, "the fixture did not add the second body"
+
+    # Every reader in play resolves the body with find(), which returns the
+    # first match and never looks for a second.
+    root = ElementTree.fromstring(document)
+    first = root.find(W + "body")
+    assert "Payment due" not in "".join(
+        node.text or "" for node in first.iter(W + "t"))
+
+    assert "Payment due" not in "\n".join(
+        p.text for p in docx.Document(str(two_bodies)).paragraphs)
+
+
+def test_a_document_with_two_bodies_is_refused(two_bodies):
+    with pytest.raises(DocumentError) as caught:
+        snapshot(two_bodies)
+    assert "2 <w:body>" in str(caught.value)
+
+
+def test_the_refusal_names_the_part_and_the_reason(two_bodies):
+    assert "word/document.xml" in package_problem(two_bodies)
+    assert "different readers" in package_problem(two_bodies)
+
+
+def test_two_bodies_exit_two_not_one(fixtures, two_bodies, capsys):
+    """A file nobody can pin down is a tool-level refusal, not a policy FAIL."""
+    code = main(["check", "--baseline", str(fixtures["word_baseline"]),
+                 "--candidate", str(two_bodies),
+                 "--policy", str(fixtures["word_policy"])])
+    assert code == 2
+    error = capsys.readouterr().err
+    assert "Traceback" not in error
+    assert "<w:body>" in error
+
+
+def test_a_second_body_is_refused_whatever_the_namespace_prefix(fixtures, tmp_path):
+    """Counting the tag as a string would miss a document that binds the
+    wordprocessingml namespace to a different prefix."""
+    def rebind(xml):
+        with_second = xml.replace("</w:body>", SECOND_BODY, 1)
+        return with_second.replace(
+            'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
+            'xmlns:zz="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        ).replace("<w:", "<zz:").replace("</w:", "</zz:").replace('w:', 'zz:')
+
+    renamed = _reshaped_document(fixtures["word_baseline"],
+                                 tmp_path / "prefixed.docx", rebind)
+    assert package_problem(renamed) is not None
+
+
+def test_text_after_the_body_is_refused(fixtures, tmp_path):
+    stray = _reshaped_document(
+        fixtures["word_baseline"], tmp_path / "tail.docx",
+        lambda xml: xml.replace("</w:body>", "</w:body>Payment due: USD 25.", 1))
+    with pytest.raises(DocumentError) as caught:
+        snapshot(stray)
+    assert "after </w:body>" in str(caught.value)
+
+
+def test_whitespace_after_the_body_is_not_a_problem(fixtures, tmp_path):
+    """Indented XML puts a newline there, and that says nothing."""
+    spaced = _reshaped_document(
+        fixtures["word_baseline"], tmp_path / "spaced.docx",
+        lambda xml: xml.replace("</w:body>", "</w:body>\n  ", 1))
+    assert package_problem(spaced) is None
+    assert "degraded" not in snapshot(spaced)
+
+
+def test_a_normal_document_is_untouched(fixtures):
+    assert package_problem(fixtures["word_baseline"]) is None
+    assert "degraded" not in snapshot(fixtures["word_baseline"])
+
+
+def test_a_normal_document_still_passes_its_policy(fixtures):
+    result = check(fixtures["word_baseline"], fixtures["word_good"],
+                   fixtures["word_policy"])
+    assert result.passed, [v.message for v in result.violations]
