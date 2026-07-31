@@ -179,8 +179,28 @@ definition would pass. The chart's *presence* is still guarded — deleting it
 also removes the drawing that anchors it to the sheet, which `drawings`
 catches.
 
-None of this applies when a library edits the file instead of Excel. Nothing
-recalculates, so there is no cascade and the narrow policy is the right one.
+The cascade is not really about Excel. It follows from **the baseline and the
+candidate having been written by different tools**, and it happens in both
+directions.
+
+Run it the other way — a library editing a workbook that Excel authored, which
+is the common case when an agent touches a real business document — and you
+get the mirror image. openpyxl does not recalculate, so rather than refreshing
+the cached results it *discards* them: every dependent cell reads as empty
+until Excel next opens the file. One measured edit of three quantity cells
+produced sixteen changes: the edit itself, seven wiped formula results, a date
+cell whose value and number format were both rewritten, two hidden columns
+whose widths read back differently, and a workbook extension block that was
+dropped.
+
+The fix is the same recipe — allow `value` across the computed ranges, keep
+`formula` protected — and it is safe for the same reason: the cached answers
+may move or vanish, the formulas that produce them may not. Expect to allow a
+little more than values alone, such as `format` on a date cell the library
+cannot round-trip and `layout` on hidden columns.
+
+Steady state is quiet. When the baseline and the candidate come from the same
+tool, there is no cascade and a narrow policy is exactly right.
 
 ### Editing in real Word
 

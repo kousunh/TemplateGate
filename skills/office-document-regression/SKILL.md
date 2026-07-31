@@ -96,13 +96,16 @@ Anything in a block that no named attribute covers is still compared, under
 
 ## If you are driving Excel itself
 
-Editing through Excel (COM/automation) is different from editing with a
-library: Excel recalculates dependent formulas and refreshes chart caches on
-every save. Cells you never touched will differ, and that is expected, not
-damage. If the policy allows only the cells you edited, a correct edit still
-FAILs — report that to the user as a policy that needs widening on the
-computed ranges, rather than assuming you broke the file. Do not edit the
-policy yourself.
+Whenever the baseline and the candidate come from different tools, cells you
+never touched will differ — and that is expected, not damage. Excel
+recalculates dependent formulas and refreshes chart caches on every save; a
+library does the opposite and discards the cached results, leaving those cells
+empty until Excel next opens the file. So editing an Excel-authored workbook
+with openpyxl cascades just as much as editing through Excel does.
+
+If the policy allows only the cells you edited, a correct edit still FAILs.
+Report that to the user as a policy needing widening on the computed ranges,
+rather than assuming you broke the file. Do not edit the policy yourself.
 
 ## If the document is opened in real Word
 
