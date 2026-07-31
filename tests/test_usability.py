@@ -186,7 +186,8 @@ def test_warnings_are_printed_to_stderr(tmp_path, capsys):
 
 # --- E3: every flag explains itself ---------------------------------------
 
-@pytest.mark.parametrize("command", ["check", "diff", "snapshot", "init"])
+@pytest.mark.parametrize("command",
+                         ["check", "diff", "snapshot", "init", "suggest"])
 def test_every_subcommand_documents_its_flags(capsys, command):
     with pytest.raises(SystemExit):
         main([command, "--help"])

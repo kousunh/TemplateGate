@@ -59,10 +59,10 @@ def _only(changes, attribute):
     return [c for c in changes if c.attribute == attribute]
 
 
-def test_the_locale_builtin_is_recorded_by_id(tmp_path):
+def test_a_locale_builtin_resolves_to_its_documented_code(tmp_path):
     """openpyxl calls it General; the id says which format it really is."""
     cell = _formats(_dated(tmp_path / "b.xlsx", 31))
-    assert dict(cell["format"])["numfmt"] == 'builtin:31 (yyyy"年"m"月"d"日")'
+    assert dict(cell["format"])["numfmt"] == 'yyyy"年"m"月"d"日"'
 
 
 def test_western_year_to_imperial_era_is_caught(tmp_path):
@@ -71,7 +71,7 @@ def test_western_year_to_imperial_era_is_caught(tmp_path):
     candidate = _dated(tmp_path / "c.xlsx", 27)
     change = _only(diff(baseline, candidate), "format")[0]
     assert change.detail == ('cell format changed: numfmt '
-                             'builtin:31 (yyyy"年"m"月"d"日") -> builtin:27 (ge.m.d)')
+                             'yyyy"年"m"月"d"日" -> ge.m.d')
     assert not check(baseline, candidate, STRICT).passed
 
 
@@ -80,7 +80,7 @@ def test_a_date_turned_into_a_time_is_caught(tmp_path):
     baseline = _dated(tmp_path / "b.xlsx", 31)
     candidate = _dated(tmp_path / "c.xlsx", 32)
     change = _only(diff(baseline, candidate), "format")[0]
-    assert "builtin:32" in change.detail
+    assert 'h"時"mm"分"' in change.detail
     assert not check(baseline, candidate, STRICT).passed
 
 
@@ -105,6 +105,27 @@ def test_a_readable_format_reads_as_itself(tmp_path):
     change = _only(diff(baseline, candidate), "format")[0]
     assert change.detail.endswith("-> mm-dd-yy")
     assert "none" not in change.detail
+
+
+def test_the_id_and_the_written_out_code_are_the_same_format(tmp_path):
+    """Excel stores 「2026年7月1日」 as builtin 31; openpyxl writes the code out.
+
+    One is shorthand for the other, and a library that converts between them
+    on save has not changed how a single cell renders.
+    """
+    from generate import rewrite_zip
+
+    as_builtin = _dated(tmp_path / "b.xlsx", 31)
+    with zipfile.ZipFile(as_builtin) as zf:
+        styles = zf.read("xl/styles.xml").decode("utf-8")
+    written_out = tmp_path / "c.xlsx"
+    rewrite_zip(as_builtin, written_out, add={
+        "xl/styles.xml": styles.replace(
+            "<numFmts count=\"0\"/>",
+            '<numFmts count="1"><numFmt numFmtId="176" '
+            'formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/></numFmts>'
+        ).replace('numFmtId="31"', 'numFmtId="176"').encode("utf-8")})
+    assert diff(as_builtin, written_out) == []
 
 
 def test_an_unknown_builtin_never_reads_as_no_format(tmp_path):
