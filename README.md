@@ -182,6 +182,65 @@ catches.
 None of this applies when a library edits the file instead of Excel. Nothing
 recalculates, so there is no cascade and the narrow policy is the right one.
 
+### Editing in real Word
+
+Word is well behaved in the steady state: opening a Word-authored document and
+saving it without editing reports nothing at all. The friction is only on the
+*first* save after Word takes over a file that a library produced.
+
+That first save is a one-time re-authoring of the document's scaffolding
+rather than damage. Word creates the footnote and endnote parts it expects
+every document to have, drops legacy parts it no longer writes, rewrites the
+style, numbering, settings and web-settings parts — re-pointing built-in
+styles to its own identifiers — restamps the image markup in the body, and
+re-points headers and footers at the renamed styles.
+
+Those are real changes to real parts, which is why they are reported instead
+of quietly ignored: only a person can say whether a wholesale style rewrite is
+acceptable. In one measured run the first save produced ten changes across
+those categories. Do not treat that as a fixed list — the built-in style names
+Word writes are localized, so the exact set varies with version and locale.
+
+**Re-baseline.** Save the document once in Word, adopt *that file* as the
+baseline, and from then on baseline and candidate share an author and the
+steady state is exactly zero.
+
+One detail decides whether this works: adopt the file Word actually wrote. Do
+not regenerate the baseline by converting the original a second time. Each
+conversion stamps fresh identifiers, so two independent first saves of the
+same source differ from each other even though neither was edited.
+
+If you cannot re-baseline — the baseline is a fixed template someone else owns
+— allow the known parts explicitly instead. These are the mechanical ones,
+safe to allow outright:
+
+```yaml
+allow:
+  - selector: "package#parts:word/footnotes.xml"
+    attributes: [parts]
+  - selector: "package#parts:word/endnotes.xml"
+    attributes: [parts]
+  - selector: "package#parts:word/numbering.xml"
+    attributes: [parts]
+  - selector: "package#parts:word/settings.xml"
+    attributes: [parts]
+  - selector: "package#parts:word/webSettings.xml"
+    attributes: [parts]
+```
+
+That is deliberately not the whole residual — on the run measured above it
+clears five of the ten changes. What remains is the style parts, the headers
+and footers, and the image markup, and each of those needs a decision from
+you, because each is somewhere real damage could hide. Derive the list from
+your own `templategate diff` output rather than copying this one, since it is
+specific to the install that produced the file.
+
+Know what finishing the list costs. Adding `word/styles.xml` to it gives up
+detection of style-definition tampering: setting every paragraph to 4pt white
+text through a style change touches nothing *but* that part, so an allow rule
+for it lets the change through silently. Re-baselining gives up nothing, which
+is why it is the recommendation and this is the fallback.
+
 ### Choosing a mode
 
 ```yaml

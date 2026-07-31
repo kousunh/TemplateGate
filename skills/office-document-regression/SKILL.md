@@ -104,6 +104,18 @@ FAILs — report that to the user as a policy that needs widening on the
 computed ranges, rather than assuming you broke the file. Do not edit the
 policy yourself.
 
+## If the document is opened in real Word
+
+The first time real Word saves a document that a library produced, it rewrites
+the scaffolding — style, numbering and settings parts, footnote and endnote
+parts it adds, legacy parts it drops. That is a one-time re-authoring, not
+damage you caused, and it looks alarming because it is many parts at once.
+Word-to-Word saves after that report nothing.
+
+If you see it, say so and stop: the fix is for the user to re-baseline (save
+once in Word and adopt that file as the baseline), which is their call, not
+yours. Do not widen the policy to absorb it.
+
 ## Hard rules
 
 - **NEVER modify the policy file to make a failing check pass.** The policy
