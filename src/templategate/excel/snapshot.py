@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -407,18 +408,23 @@ def _layout(ws) -> dict:
     return out
 
 
-def _images(ws) -> list[dict]:
+def _images(ws, displayed: dict | None = None) -> list[dict]:
     images = []
+    displayed = displayed or {}
     for img in getattr(ws, "_images", []):
         try:
             data = img._data()
         except Exception:
             data = b""
         anchor = getattr(img.anchor, "_from", None)
+        at = (anchor.col, anchor.row) if anchor is not None else None
+        # The size a reader sees, falling back to the file's own dimensions
+        # only when the drawing does not say.
+        size = displayed.get(at) or (round(img.width or 0), round(img.height or 0))
         images.append({
             "sha256": hashlib.sha256(data).hexdigest(),
-            "anchor": (anchor.col, anchor.row) if anchor is not None else None,
-            "size": (round(img.width or 0), round(img.height or 0)),
+            "anchor": at,
+            "size": size,
         })
     return sorted(images, key=lambda d: (d["sha256"], d["anchor"] or (-1, -1)))
 
@@ -470,7 +476,8 @@ _EMPTY_SHEET = {
 def _sheet_snapshot(ws, index: int, wb_value, *,
                     ignored_errors: str | None = None,
                     default_font: tuple = (None, None),
-                    epoch=None) -> dict:
+                    epoch=None,
+                    displayed_sizes: dict | None = None) -> dict:
     """One sheet's contents.
 
     A workbook may also contain chartsheets, which carry no cell grid at all —
@@ -491,7 +498,7 @@ def _sheet_snapshot(ws, index: int, wb_value, *,
         "merges": sorted(str(m) for m in ws.merged_cells.ranges),
         "conditional_formatting": _conditional_formatting(ws),
         "data_validation": _data_validation(ws),
-        "images": _images(ws),
+        "images": _images(ws, displayed_sizes),
         "header_footer": _header_footer(ws),
         "print": _print_settings(ws),
         "protection": _protection(ws),
@@ -507,6 +514,93 @@ def _sheet_snapshot(ws, index: int, wb_value, *,
 _MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _DOC_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+_DRAWING_NS = "{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}"
+_IMAGE_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+
+
+def _relationship_targets(zf, part: str) -> dict[str, str]:
+    """The relationships a part declares, as id -> package-absolute name."""
+    import xml.etree.ElementTree as ElementTree
+
+    folder, _, name = part.rpartition("/")
+    rels_part = f"{folder}/_rels/{name}.rels"
+    if rels_part not in zf.namelist():
+        return {}
+    root = ElementTree.fromstring(zf.read(rels_part))
+    targets = {}
+    for relationship in root.iter(_PKG_REL_NS + "Relationship"):
+        target = relationship.get("Target", "").lstrip("/")
+        if target and not target.startswith(("xl/", "word/", "customXml/")):
+            target = f"{folder}/{target}"
+        targets[relationship.get("Id")] = target
+    return targets
+
+
+def _sheet_parts(zf) -> dict[str, str]:
+    """Sheet name -> the worksheet part that holds it."""
+    import xml.etree.ElementTree as ElementTree
+
+    names = set(zf.namelist())
+    if "xl/workbook.xml" not in names:
+        return {}
+    workbook = ElementTree.fromstring(zf.read("xl/workbook.xml"))
+    targets = _relationship_targets(zf, "xl/workbook.xml")
+    found = {}
+    for sheet in workbook.iter(_MAIN_NS + "sheet"):
+        part = targets.get(sheet.get(_DOC_REL_NS + "id"), "")
+        if part and part in names:
+            found[sheet.get("name", "")] = part
+    return found
+
+
+def _marker(anchor, tag: str):
+    node = anchor.find(_DRAWING_NS + tag)
+    if node is None:
+        return None
+    return tuple(
+        (node.find(_DRAWING_NS + field).text or "0")
+        for field in ("col", "colOff", "row", "rowOff")
+        if node.find(_DRAWING_NS + field) is not None
+    )
+
+
+def _displayed_sizes(path: Path) -> dict[str, dict[tuple, tuple]]:
+    """Per sheet, the size each anchored picture occupies on the page.
+
+    openpyxl reports an image's *intrinsic* pixel size — it re-derives width
+    and height from the image file on load — so a picture stretched across
+    the page or shrunk to a dot looked untouched.  What the reader sees is
+    the anchor's extent, and that only exists in the drawing XML.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    sizes: dict[str, dict[tuple, tuple]] = {}
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            for sheet_name, sheet_part in _sheet_parts(zf).items():
+                for target in _relationship_targets(zf, sheet_part).values():
+                    if not target.startswith("xl/drawings/") or target not in names:
+                        continue
+                    root = ElementTree.fromstring(zf.read(target))
+                    per_sheet = sizes.setdefault(sheet_name, {})
+                    for anchor in root:
+                        if anchor.find(f".//{_DRAWING_NS}pic") is None:
+                            continue
+                        start = _marker(anchor, "from")
+                        if start is None:
+                            continue
+                        extent = anchor.find(_DRAWING_NS + "ext")
+                        if extent is not None:
+                            size = ("emu", extent.get("cx"), extent.get("cy"))
+                        else:
+                            size = ("to",) + (_marker(anchor, "to") or ())
+                        per_sheet[(int(start[0]), int(start[2]))] = size
+    except Exception:
+        return {}
+    return sizes
 
 
 def _ignored_errors(path: Path) -> dict[str, str]:
@@ -577,13 +671,15 @@ def take_snapshot(path: str | Path) -> dict:
 
     suppressed = _ignored_errors(path)
     default_font = _default_font(wb_formula)
+    on_page = _displayed_sizes(path)
     sheets: dict[str, dict] = {}
     for index, name in enumerate(wb_formula.sheetnames):
         ws = wb_formula[name]
         sheets[name] = _sheet_snapshot(ws, index, wb_value,
                                        ignored_errors=suppressed.get(name),
                                        default_font=default_font,
-                                       epoch=wb_formula.epoch)
+                                       epoch=wb_formula.epoch,
+                                       displayed_sizes=on_page.get(name))
 
     defined_names = {}
     for name, dn in wb_formula.defined_names.items():

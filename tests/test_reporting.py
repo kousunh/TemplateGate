@@ -393,6 +393,75 @@ def test_a_replaced_image_still_reads_as_two_lines(tmp_path):
                                            "image added at C3"}
 
 
+def _with_image(tmp_path, name, anchor="C3"):
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image as PILImage
+
+    logo = tmp_path / "logo.png"
+    if not logo.exists():
+        PILImage.new("RGB", (40, 40), (10, 90, 200)).save(logo)
+    path = tmp_path / f"{name}.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "見積書"
+    ws["A1"] = "x"
+    ws.add_image(XLImage(str(logo)), anchor)
+    wb.save(path)
+    return path
+
+
+def _rescaled(tmp_path, source, name, emu):
+    """Resize the picture the way dragging its handle in Excel would."""
+    from generate import rewrite_zip
+
+    with zipfile.ZipFile(source) as zf:
+        drawing = zf.read("xl/drawings/drawing1.xml").decode("utf-8")
+    resized = drawing.replace('cx="381000" cy="381000"',
+                              f'cx="{emu}" cy="{emu}"')
+    assert resized != drawing, "the fixture should carry an explicit extent"
+    path = tmp_path / f"{name}.xlsx"
+    rewrite_zip(source, path, add={"xl/drawings/drawing1.xml": resized.encode()})
+    return path
+
+
+def test_a_stretched_image_is_caught(tmp_path):
+    """A 社印 blown up across the page keeps its bytes and its anchor.
+
+    openpyxl re-derives an image's size from the image file, so the only
+    place the displayed size exists is the drawing's extent.
+    """
+    baseline = _with_image(tmp_path, "b")
+    stretched = _rescaled(tmp_path, baseline, "c", 3810000)
+    changes = diff(baseline, stretched)
+    assert len(changes) == 1
+    assert changes[0].attribute == "images"
+    assert changes[0].detail == (
+        "same image, resized from 40x40 pixels to 400x400 pixels")
+
+
+def test_an_image_shrunk_to_nothing_is_caught(tmp_path):
+    baseline = _with_image(tmp_path, "b")
+    shrunk = _rescaled(tmp_path, baseline, "c", 3810)
+    assert diff(baseline, shrunk)[0].detail.endswith("to 0x0 pixels")
+
+
+def test_resizing_reports_once_not_as_a_drawing_change_too(tmp_path):
+    """The drawings category must not restate what images already said."""
+    baseline = _with_image(tmp_path, "b")
+    stretched = _rescaled(tmp_path, baseline, "c", 3810000)
+    assert {c.attribute for c in diff(baseline, stretched)} == {"images"}
+
+
+def test_reading_the_size_back_unchanged_is_silent(tmp_path):
+    """The extent must be stable across a plain library round-trip."""
+    from openpyxl import load_workbook
+
+    baseline = _with_image(tmp_path, "b")
+    resaved = tmp_path / "rt.xlsx"
+    load_workbook(baseline).save(resaved)
+    assert diff(baseline, resaved) == []
+
+
 def test_a_resized_image_says_resized():
     """Exercised directly: openpyxl re-derives size from the file on load."""
     from templategate.excel.diff import _diff_images

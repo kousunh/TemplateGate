@@ -174,6 +174,27 @@ def _at(anchor) -> str:
     return f"{get_column_letter(int(column) + 1)}{int(row) + 1}"
 
 
+# Office measures drawings in English Metric Units; 9525 of them make one
+# screen pixel, which is the unit a person can picture.
+_EMU_PER_PIXEL = 9525
+
+
+def _size_text(size) -> str:
+    """An image's on-page size, in pixels where the drawing gives us EMU."""
+    if not size:
+        return "an unknown size"
+    kind = size[0]
+    if kind == "emu":
+        try:
+            width, height = (round(int(value) / _EMU_PER_PIXEL) for value in size[1:3])
+            return f"{width}x{height} pixels"
+        except (TypeError, ValueError):
+            return "an unreadable size"
+    if kind == "to":
+        return "a different cell span"
+    return "x".join(str(part) for part in size)
+
+
 def _diff_images(sheet: str, gone: set, arrived: set) -> list[Change]:
     """Image differences, saying *moved* when the picture itself is the same.
 
@@ -191,8 +212,8 @@ def _diff_images(sheet: str, gone: set, arrived: set) -> list[Change]:
         if old_anchor != new_anchor:
             parts.append(f"moved from {_at(old_anchor)} to {_at(new_anchor)}")
         if old_size != new_size:
-            parts.append(f"resized from {old_size[0]}x{old_size[1]} "
-                         f"to {new_size[0]}x{new_size[1]}")
+            parts.append(f"resized from {_size_text(old_size)} "
+                         f"to {_size_text(new_size)}")
         changes.append(Change(
             f"{sheet}#image:{sha[:8]}", ATTR_IMAGES,
             old={"anchor": old_anchor, "size": old_size},
