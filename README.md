@@ -93,6 +93,14 @@ documents from it. Configuration mistakes are exit 2 as well. Neither
 `review_only` mode nor `structural: ignore` can bless a document that cannot
 be read.
 
+Between those two there is a middle state worth knowing about. When a file
+comes from a writer that omits parts the usual readers expect — document
+properties, for instance — the check falls back to comparing package parts
+alone. It says so in the report rather than pretending otherwise. That is an
+honest comparison but a much weaker one: part-level hashes will tell you a
+sheet changed, not which cell. If you see it, prefer a writer that produces a
+complete package.
+
 A policy looks like this:
 
 ```yaml
@@ -366,6 +374,54 @@ Other commands:
 templategate diff --baseline a.xlsx --candidate b.xlsx   # list every change, no policy
 templategate snapshot file.docx                           # dump the structural snapshot
 ```
+
+## Which editing tools work
+
+All of them, for detection. The gate judges the file, not the editor, so no
+tool is unsupported. What differs is how much collateral each one leaves
+behind, and therefore how wide your policy has to be to accept a correct edit.
+
+Measured 2026-07-31 by opening one Excel-authored workbook — formulas with
+cached results, hidden columns, a seal image, a Japanese date format, theme
+colours — and saving it again with **no edit at all**:
+
+| Writer | Version | Changes | What it did |
+|---|---|---|---|
+| Excel / Word via COM (incl. xlwings) | Office 16 | 0 | Word→Word is exactly silent; Excel refreshes caches it can recompute |
+| python-docx | 1.2.0 | 0 | silent on a Word-authored document |
+| openpyxl | 3.1.5 | 13 | discards 11 cached formula results; hidden-column width; workbook extension block |
+| ExcelJS | 4.4.0 | 17 | vertical alignment and theme font colours on 12 cells; Japanese date format down to a bare serial |
+| SheetJS (`xlsx`) | 0.18.5 | 49 | borders, fills, fonts and alignment across 38 cells; the image; the theme and metadata parts |
+| pandas + XlsxWriter | 3.0.5 / 3.2.9 | 113 | authoring, not editing — see below |
+
+Two caveats on that table. **openpyxl needs Pillow**: without it, it also
+deletes images outright rather than preserving them, so install it alongside.
+And **python-docx's zero is for this document** — earlier sweeps found it drops
+comments and VBA, which this one did not contain.
+
+**pandas and XlsxWriter are authoring tools, not editors.** XlsxWriter cannot
+open an existing workbook at all; writing "to" a file replaces it. The 113
+changes above are not a bug, they are what "rewrite the file from a DataFrame"
+means — formulas, images, merges and formatting are gone because they were
+never read. Re-baselining from the writer's own first output is the expected
+workflow here, not a workaround.
+
+### Getting out of the way of it
+
+This kind of damage is deterministic: the same library on the same file makes
+the same omissions every time. Retrying is pointless. Three things do work:
+
+- **Use a richer editor.** A document with charts, shapes and real formatting
+  needs a tool that understands them. Driving real Excel or Word through COM —
+  xlwings, or the automation interface directly — is the safest option and is
+  available on any machine with Office installed.
+- **Edit the package directly.** For a value-only change, rewriting the one
+  XML part inside the `.xlsx` zip touches nothing else by construction.
+- **Let real Office repair what it can.** Opening a library-damaged workbook in
+  Excel and saving restores the cached results it can recompute. In the run
+  above that took openpyxl's 14 changes down to 2 — but the two that remained
+  were the deleted image and the dropped extension block. **A resave recomputes;
+  it does not resurrect.** Anything actually removed is still gone.
 
 ## When the gate fails
 

@@ -119,6 +119,33 @@ If you see it, say so and stop: the fix is for the user to re-baseline (save
 once in Word and adopt that file as the baseline), which is their call, not
 yours. Do not widen the policy to absorb it.
 
+## When it FAILs, classify before you react
+
+The first question is never "how do I fix this edit" — it is **whose limit did
+I just hit**.
+
+**Your mistake.** `text` or `value` violations at locations you deliberately
+edited. You changed something you were not allowed to change. Fix the edit and
+re-run. This is the only class that retrying helps.
+
+**Your tool's ceiling.** `package#...`, `charts`, `images`, `parts`, `format`
+or metadata violations you did not intend, usually far from where you were
+working. The library you are using cannot represent that part, so it dropped
+it on save. **This is deterministic — running the same library again produces
+the same loss.** Retrying is not a strategy. Escalate instead:
+
+1. Re-do the edit with real Excel or Word driven through COM (xlwings, or the
+   automation interface). It is the richest editor available and is on any
+   machine with Office installed.
+2. If only a value needs changing, edit the XML part inside the package
+   directly — by construction that touches nothing else.
+3. If neither is available, stop and hand the violation list to the human.
+   Say which tool you used and what it dropped. That is a useful report, not
+   a failure to finish.
+
+Do not try to repair a dropped part by editing the candidate further, and do
+not re-save it — the second save loses more than the first.
+
 ## Hard rules
 
 - **NEVER modify the policy file to make a failing check pass.** The policy
