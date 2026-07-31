@@ -95,6 +95,32 @@ def main(argv: list[str] | None = None) -> int:
     p_snap.add_argument("--output", metavar="FILE",
                         help="write the JSON to a file instead of stdout")
 
+    p_suggest = sub.add_parser(
+        "suggest", help="draft a policy from an edit you have already approved",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Turn one reviewed edit into a starting policy. Give it a "
+                    "baseline and a candidate you have checked by eye; it "
+                    "allows what that edit did, explains the collateral every "
+                    "save produces, and refuses to allow anything suspicious.",
+        epilog=("Examples:\n"
+                "  templategate suggest --baseline plan.xlsx --candidate plan.edited.xlsx\n"
+                "  templategate suggest --baseline a.docx --candidate b.docx"
+                " --output .templategate/draft.yaml\n"
+                "  templategate suggest --baseline a.xlsx --candidate b.xlsx"
+                " --policy existing.yaml"))
+    p_suggest.add_argument("--baseline", required=True, metavar="FILE",
+                           help=baseline_help)
+    p_suggest.add_argument("--candidate", required=True, metavar="FILE",
+                           help="a candidate whose changes you have reviewed "
+                                "and consider correct")
+    p_suggest.add_argument("--policy", metavar="FILE",
+                           help="an existing policy to propose additions to, "
+                                "rather than drafting from scratch")
+    p_suggest.add_argument("--output", metavar="FILE",
+                           help="write the draft to a file instead of stdout")
+    p_suggest.add_argument("--force", action="store_true",
+                           help="overwrite the output file if it already exists")
+
     p_init = sub.add_parser(
         "init", help="write a starter policy file",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -165,6 +191,25 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(f"snapshot written to {args.output}")
         else:
             print(text)
+        return 0
+
+    if args.command == "suggest":
+        from .suggest import draft
+
+        text = draft(args.baseline, args.candidate,
+                     existing=Path(args.policy) if args.policy else None)
+        if not args.output:
+            print(text, end="")
+            return 0
+        path = Path(args.output)
+        if path.exists() and not args.force:
+            print(f"templategate: {path} already exists, not overwriting "
+                  "(use --force)", file=sys.stderr)
+            return 2
+        path.write_text(text, encoding="utf-8")
+        print(f"policy draft written to {path}")
+        print("templategate: review it before pinning it in CI — a draft only "
+              "knows the one edit it was shown", file=sys.stderr)
         return 0
 
     if args.command == "init":
