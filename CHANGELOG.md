@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A sheet that was renamed and, in the same edit, hidden, moved or swapped
+  for a chartsheet reported only the rename. A renamed sheet's visibility,
+  position and kind are now compared too, under its baseline name. Sheets
+  that were merely paired for content comparison (a deletion plus an
+  unrelated addition) still get no structure comparison.
+
 ## [0.1.0] - 2026-07-31
 
 Initial release.

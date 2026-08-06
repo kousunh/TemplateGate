@@ -134,10 +134,14 @@ def diff_snapshots(base: dict, cand: dict) -> list[Change]:
 
     # A renamed sheet keeps being compared cell by cell, reported under its
     # baseline name so that policy selectors written against the template
-    # still apply.
-    for old_name, new_name, _score in renames:
+    # still apply.  Its position, kind and visibility are compared too, or a
+    # sheet renamed *and* hidden in one edit reports only the rename.  A
+    # low-similarity pairing gets no such comparison: the two sheets are
+    # unrelated, and "sheet moved" between them would describe nothing.
+    for old_name, new_name, score in renames:
         changes.extend(_diff_sheet(old_name, base_sheets[old_name],
-                                   cand_sheets[new_name], include_structure=False,
+                                   cand_sheets[new_name],
+                                   include_structure=_is_rename((new_name, score)),
                                    font_defaults=font_defaults))
 
     for name in base.get("defined_names", {}).keys() | cand.get("defined_names", {}).keys():

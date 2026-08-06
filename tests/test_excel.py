@@ -148,6 +148,64 @@ def test_genuinely_added_sheet_is_not_paired(tmp_path):
     ]
 
 
+def _sheets(path, specs):
+    """A workbook of (title, values, state) sheets, in the given order."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    for title, values, state in specs:
+        ws = wb.create_sheet(title)
+        ws.sheet_state = state
+        for coord, value in values.items():
+            ws[coord] = value
+    wb.save(path)
+
+
+_PLAN = {"A1": "Budget", "A2": "Q1", "B2": 1000, "A3": "Q2", "B3": 2000}
+_KEEP = ("Keep", {"A1": "untouched"}, "visible")
+
+
+def test_renamed_sheet_that_is_also_hidden_reports_both(tmp_path):
+    """Renaming and hiding in one edit used to report only the rename."""
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    _sheets(baseline, [("Plan", _PLAN, "visible"), _KEEP])
+    _sheets(candidate, [("Plan_old", _PLAN, "hidden"), _KEEP])
+
+    changes = diff(baseline, candidate)
+    details = {c.location: c.detail for c in changes}
+    assert details["sheet:Plan_old"] == "sheet renamed from 'Plan'"
+    hidden = [c for c in changes
+              if c.location == "sheet:Plan" and c.detail == "sheet visibility changed"]
+    assert [(c.old, c.new) for c in hidden] == [("visible", "hidden")]
+    assert not check(baseline, candidate, STRICT_EXCEL).passed
+
+
+def test_renamed_sheet_that_is_also_moved_reports_both(tmp_path):
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    _sheets(baseline, [("Plan", _PLAN, "visible"), _KEEP])
+    _sheets(candidate, [_KEEP, ("Plan_old", _PLAN, "visible")])
+
+    moved = [c for c in diff(baseline, candidate)
+             if c.location == "sheet:Plan" and c.detail == "sheet moved"]
+    assert [(c.old, c.new) for c in moved] == [(0, 1)]
+
+
+def test_unrelated_pairing_reports_no_structure_change(tmp_path):
+    """A deletion plus an addition are not one sheet that moved or was hidden."""
+    baseline = tmp_path / "base.xlsx"
+    candidate = tmp_path / "cand.xlsx"
+    _sheets(baseline, [("Plan", _PLAN, "visible"), _KEEP])
+    _sheets(candidate, [_KEEP, ("Notes", {"A1": "totally", "A2": "different"}, "hidden")])
+
+    changes = diff(baseline, candidate)
+    assert [c.detail for c in changes if c.location == "sheet:Plan"] == [
+        "sheet removed (contents compared against 'Notes', which is not a rename)"
+    ]
+    # the contents are still compared, under the baseline name
+    assert any(c.location == "Plan!A1" and c.attribute == ATTR_VALUE for c in changes)
+
+
 def _sheet_with_rules(path, cf_formula, dv_formula):
     wb = Workbook()
     ws = wb.active
