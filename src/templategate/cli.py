@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
 
 from . import __version__
@@ -26,6 +27,15 @@ from .reporters import RENDERERS
 
 
 def main(argv: list[str] | None = None) -> int:
+    # openpyxl warns "... extension is not supported and will be removed" for
+    # the extLst blocks it cannot model — sparklines, x14 rules, slicers.
+    # Those are exactly the blocks the package layer hashes and compares
+    # itself, so the warning would tell a reader those features went
+    # unchecked, which is the opposite of what happens.  CLI only: the
+    # library API leaves warning policy to the caller.
+    warnings.filterwarnings(
+        "ignore", message=r".*extension is not supported and will be removed",
+        category=UserWarning, module=r"openpyxl\.")
     # Windows consoles often default to a legacy codepage; reports contain
     # non-ASCII sheet names and cell values.
     for stream in (sys.stdout, sys.stderr):

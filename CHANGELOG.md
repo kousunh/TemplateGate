@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-06
+
 ### Fixed
 
 - A sheet that was renamed and, in the same edit, hidden, moved or swapped
@@ -14,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   position and kind are now compared too, under its baseline name. Sheets
   that were merely paired for content comparison (a deletion plus an
   unrelated addition) still get no structure comparison.
+- The CLI no longer surfaces openpyxl's "extension is not supported and
+  will be removed" warning. The extension blocks it refers to (sparklines,
+  x14 rules, slicers) are hashed and compared by the package layer, so the
+  warning claimed the opposite of what happens. The library API leaves
+  warning policy to the caller, as before.
+
+### Changed
+
+- The agent skill's trigger description now matches any edit to an existing
+  Office document, in English and Japanese, instead of qualifying itself to
+  documents "that must keep their structure intact".
+- Both READMEs document skill installation per agent (Claude Code, Codex,
+  ChatGPT / ChatGPT Work) and recommend committing the skill to the document
+  repository's `.agents/skills/` next to the baseline and policy.
 
 ## [0.1.0] - 2026-07-31
 
