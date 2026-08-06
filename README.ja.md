@@ -530,26 +530,34 @@ if not result.passed:
 
 ## AIエージェント向け
 
-`skills/office-document-regression/` に Agent Skill(Claude Code / Codex /
-Claude Cowork ほか、指示ファイルを読めるエージェントならどれでも)が入って
-います。「コピーを編集 → `templategate check` を実行 → JSONレポートを解釈 →
+`skills/office-document-regression/` に Agent Skill が入っています。
+「コピーを編集 → `templategate check` を実行 → JSONレポートを解釈 →
 **FAILを通すためにポリシーを書き換えることは絶対にしない**」
 という安全な作業手順をエージェントに教えます。
 
-導入方法:
+形式はオープンな Agent Skills 規格(`SKILL.md`)で、Claude Code・Codex・
+ChatGPT / ChatGPT Work がネイティブに対応しています。導入はディレクトリを
+1つコピーするだけ。以後は Office 文書の編集を頼まれたときに frontmatter の
+`description` を引き金に**スキルが自動で発火**します — プロンプトや
+`AGENTS.md` への記述は不要です。
 
-- **Claude Code** — プロジェクトの `.claude/skills/` に(全プロジェクトで
-  使うなら `~/.claude/skills/` に)ディレクトリごとコピーします。
+- **Claude Code** — プロジェクトの `.claude/skills/`(全プロジェクトで
+  使うなら `~/.claude/skills/`)へ:
 
   ```bash
   cp -r skills/office-document-regression .claude/skills/
   ```
 
-- **その他のエージェント(Codex、Claude Cowork など)** — `SKILL.md` は
-  Claude 固有の内容を含まないただの指示ファイルです。`AGENTS.md` や
-  システムプロンプトから「Excel / Word 文書を編集する前に
-  `skills/office-document-regression/SKILL.md` を読んで従うこと」のように
-  参照させてください。
+- **Codex** — リポジトリの `.agents/skills/`(作業ディレクトリから
+  リポジトリルートまで自動走査されます。全プロジェクトで使うなら
+  `~/.codex/skills/`)へ:
+
+  ```bash
+  cp -r skills/office-document-regression .agents/skills/
+  ```
+
+- **ChatGPT / ChatGPT Work** — Skills 機能からスキルフォルダを追加します。
+  ワークスペース管理者はチーム全体に共有できます。
 
 ## GitHub Action
 

@@ -526,25 +526,33 @@ if not result.passed:
 ## For AI agents
 
 The `skills/office-document-regression/` directory contains an agent skill
-(Claude Code, Codex, Claude Cowork, and any agent that can follow an
-instruction file) that teaches an agent the safe workflow: edit a copy, run
+that teaches an agent the safe workflow: edit a copy, run
 `templategate check`, interpret the JSON report, and **never** edit the
 policy to make a failing check pass.
 
-To install it:
+It uses the open Agent Skills format (`SKILL.md`), which Claude Code,
+Codex, and ChatGPT / ChatGPT Work all support natively. Installing it is
+copying one directory; after that it triggers by itself whenever the agent
+is asked to edit an Office document — the frontmatter `description` is the
+trigger, no prompt or `AGENTS.md` wiring needed.
 
-- **Claude Code** — copy the directory into your project's `.claude/skills/`
-  (or `~/.claude/skills/` to have it in every project):
+- **Claude Code** — `.claude/skills/` in the project, or `~/.claude/skills/`
+  for every project:
 
   ```bash
   cp -r skills/office-document-regression .claude/skills/
   ```
 
-- **Other agents (Codex, Claude Cowork, ...)** — `SKILL.md` is a plain
-  instruction file with no Claude-specific content. Point your agent's own
-  instruction mechanism at it — a line in `AGENTS.md` or the system prompt
-  such as: *"Before editing any Excel or Word document, read and follow
-  `skills/office-document-regression/SKILL.md`."*
+- **Codex** — `.agents/skills/` in the repository (auto-discovered from the
+  working directory up to the repo root), or `~/.codex/skills/` for every
+  project:
+
+  ```bash
+  cp -r skills/office-document-regression .agents/skills/
+  ```
+
+- **ChatGPT / ChatGPT Work** — add the skill folder through the Skills
+  feature; a workspace admin can share it with the whole team.
 
 ## GitHub Action
 
