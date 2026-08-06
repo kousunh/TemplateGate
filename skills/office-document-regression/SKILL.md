@@ -1,10 +1,13 @@
 ---
 name: office-document-regression
 description: >
-  Safely edit Excel (.xlsx/.xlsm) or Word (.docx) documents and verify the
-  result with TemplateGate. Use whenever asked to modify an Office document
-  that must keep its structure, formulas, or formatting intact — before
-  handing the edited file back, always run the acceptance check.
+  Safely edit an existing Excel (.xlsx/.xlsm) or Word (.docx) file and
+  verify the result with TemplateGate before delivering it. Use for ANY
+  request to modify, update, fill in or correct an existing Office
+  document — quotes, invoices, order forms, reports, contracts, forms
+  (Excel・Word文書の編集・更新・修正・記入。見積書・請求書・発注書・
+  報告書・契約書など). Not needed when creating a brand-new document
+  from scratch.
 ---
 
 # Office document regression check (TemplateGate)

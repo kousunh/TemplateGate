@@ -536,7 +536,8 @@ if not result.passed:
 という安全な作業手順をエージェントに教えます。
 
 形式はオープンな Agent Skills 規格(`SKILL.md`)で、Claude Code・Codex・
-ChatGPT / ChatGPT Work がネイティブに対応しています。導入はディレクトリを
+ChatGPT / ChatGPT Work のほか、対応エージェントが増え続けています
+(Gemini CLI、Cursor、GitHub Copilot など)。導入はディレクトリを
 1つコピーするだけ。以後は Office 文書の編集を頼まれたときに frontmatter の
 `description` を引き金に**スキルが自動で発火**します — プロンプトや
 `AGENTS.md` への記述は不要です。
@@ -558,6 +559,22 @@ ChatGPT / ChatGPT Work がネイティブに対応しています。導入はデ
 
 - **ChatGPT / ChatGPT Work** — Skills 機能からスキルフォルダを追加します。
   ワークスペース管理者はチーム全体に共有できます。
+
+- **その他のエージェント** — 多くは `.agents/skills/` か、それに相当する
+  自前のディレクトリを読みます。各ツールのスキルのドキュメントを確認して
+  ください。
+
+いちばん強い配り方は、**文書リポジトリ自体に**ベースライン・ポリシーと
+並べてスキルをコミットしておくことです:
+
+```bash
+cp -r skills/office-document-regression <文書リポジトリ>/.agents/skills/
+```
+
+`.agents/skills/` はベンダー中立の置き場所です。そのリポジトリを
+スキル対応エージェントで開いた人は、最初のプロンプトから安全な編集
+ワークフローで作業することになります — マシンごとの導入は不要で、
+ルールが守るべき文書と一緒に移動します。
 
 ## GitHub Action
 

@@ -530,11 +530,12 @@ that teaches an agent the safe workflow: edit a copy, run
 `templategate check`, interpret the JSON report, and **never** edit the
 policy to make a failing check pass.
 
-It uses the open Agent Skills format (`SKILL.md`), which Claude Code,
-Codex, and ChatGPT / ChatGPT Work all support natively. Installing it is
-copying one directory; after that it triggers by itself whenever the agent
-is asked to edit an Office document — the frontmatter `description` is the
-trigger, no prompt or `AGENTS.md` wiring needed.
+It uses the open Agent Skills format (`SKILL.md`), supported natively by
+Claude Code, Codex, ChatGPT / ChatGPT Work and a growing list of other
+agents (Gemini CLI, Cursor, GitHub Copilot, ...). Installing it is copying
+one directory; after that it triggers by itself whenever the agent is asked
+to edit an Office document — the frontmatter `description` is the trigger,
+no prompt or `AGENTS.md` wiring needed.
 
 - **Claude Code** — `.claude/skills/` in the project, or `~/.claude/skills/`
   for every project:
@@ -553,6 +554,21 @@ trigger, no prompt or `AGENTS.md` wiring needed.
 
 - **ChatGPT / ChatGPT Work** — add the skill folder through the Skills
   feature; a workspace admin can share it with the whole team.
+
+- **Other agents** — most read either `.agents/skills/` or their own
+  equivalent of the same directory; check the tool's skills documentation.
+
+The strongest deployment is committing the skill into the *document*
+repository itself, next to the baseline and the policy:
+
+```bash
+cp -r skills/office-document-regression <your-docs-repo>/.agents/skills/
+```
+
+`.agents/skills/` is the vendor-neutral location. Anyone who opens that
+repository with a skills-capable agent gets the safe-edit workflow from
+their first prompt — nothing to install per machine, and the rules travel
+with the documents they protect.
 
 ## GitHub Action
 
