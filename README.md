@@ -57,23 +57,23 @@ TemplateGate is a command-line tool, so install it as one — isolated from your
 project's own dependencies:
 
 ```bash
-uv tool install git+https://github.com/kousunh/TemplateGate.git
+uv tool install templategate
 ```
 
 To use the Python API from your own project instead, add it as a dependency:
 
 ```bash
-uv add git+https://github.com/kousunh/TemplateGate.git
+uv add templategate
 ```
 
 Plain pip works too, if you would rather not add a tool:
 
 ```bash
-pip install git+https://github.com/kousunh/TemplateGate.git
+pip install templategate
 ```
 
-Publishing to PyPI is planned. After that the `git+https://...` URL becomes
-just `templategate` in any of the three commands above.
+To try the latest unreleased revision, replace `templategate` with
+`git+https://github.com/kousunh/TemplateGate.git` in any of the commands.
 
 Requires Python 3.10+. No Office installation and no network access are needed
 to run a check. Dependencies: openpyxl, python-docx (which brings lxml),

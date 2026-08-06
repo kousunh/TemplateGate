@@ -54,24 +54,24 @@ TemplateGate はコマンドラインツールです。プロジェクトの依�
 形でインストールするのが基本です:
 
 ```bash
-uv tool install git+https://github.com/kousunh/TemplateGate.git
+uv tool install templategate
 ```
 
 自分のプロジェクトから Python API として使う場合は、依存パッケージとして
 追加します:
 
 ```bash
-uv add git+https://github.com/kousunh/TemplateGate.git
+uv add templategate
 ```
 
 ツールを増やしたくない場合は、pip でも同じことができます:
 
 ```bash
-pip install git+https://github.com/kousunh/TemplateGate.git
+pip install templategate
 ```
 
-PyPI への公開は予定されています。公開後は、上記いずれのコマンドでも
-`git+https://...` の部分が単に `templategate` になります。
+リリース前の最新版を試す場合は、いずれのコマンドでも `templategate` を
+`git+https://github.com/kousunh/TemplateGate.git` に置き換えてください。
 
 Python 3.10+。検査の実行に Office のインストールもネットワーク接続も
 不要です。依存パッケージ: openpyxl / python-docx(lxml を伴う)/
