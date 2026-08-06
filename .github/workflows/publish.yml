@@ -20,6 +20,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write # required for trusted publishing
+      contents: write # required to move the floating major tag
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -29,3 +30,14 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Keep the floating major tag on the latest release, so that
+      # `uses: kousunh/TemplateGate/action@v1` runs the same code PyPI
+      # ships. Runs only after a successful upload; v1 is excluded from
+      # this workflow's trigger, so the push cannot re-trigger it.
+      - name: Move the v1 tag to this release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f v1
+          git push -f origin v1

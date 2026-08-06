@@ -593,6 +593,10 @@ summary either way. It exposes two outputs, `passed` (`true` / `false`) and
 `report-path`; to read them instead of failing the job, add
 `continue-on-error: true` to the step.
 
+`@v1` is a floating tag that follows the latest release. For CI you audit,
+pin to a full commit SHA instead (`kousunh/TemplateGate/action@<sha>`) — the
+same practice you would apply to any third-party action.
+
 ## What TemplateGate is not
 
 - Not an editor, converter, or auto-repair tool. See

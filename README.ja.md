@@ -600,6 +600,10 @@ cp -r skills/office-document-regression <文書リポジトリ>/.agents/skills/
 `report-path` の2つ。ジョブを失敗させずに出力だけ読みたい場合は、
 ステップに `continue-on-error: true` を付けてください。
 
+`@v1` は最新リリースに追従する可変タグです。監査対象のCIでは、他の
+サードパーティActionと同様に、完全なコミットSHAへの固定
+(`kousunh/TemplateGate/action@<sha>`)を推奨します。
+
 ## TemplateGate がやらないこと
 
 - 編集・変換・自動修復([FAILしたとき](#failしたとき)を参照)
