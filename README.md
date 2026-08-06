@@ -526,9 +526,25 @@ if not result.passed:
 ## For AI agents
 
 The `skills/office-document-regression/` directory contains an agent skill
-(Claude Code, Codex, ChatGPT and compatible) that teaches an agent the safe
-workflow: edit a copy, run `templategate check`, interpret the JSON report,
-and **never** edit the policy to make a failing check pass.
+(Claude Code, Codex, Claude Cowork, and any agent that can follow an
+instruction file) that teaches an agent the safe workflow: edit a copy, run
+`templategate check`, interpret the JSON report, and **never** edit the
+policy to make a failing check pass.
+
+To install it:
+
+- **Claude Code** — copy the directory into your project's `.claude/skills/`
+  (or `~/.claude/skills/` to have it in every project):
+
+  ```bash
+  cp -r skills/office-document-regression .claude/skills/
+  ```
+
+- **Other agents (Codex, Claude Cowork, ...)** — `SKILL.md` is a plain
+  instruction file with no Claude-specific content. Point your agent's own
+  instruction mechanism at it — a line in `AGENTS.md` or the system prompt
+  such as: *"Before editing any Excel or Word document, read and follow
+  `skills/office-document-regression/SKILL.md`."*
 
 ## GitHub Action
 

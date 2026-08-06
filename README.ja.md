@@ -531,9 +531,25 @@ if not result.passed:
 ## AIエージェント向け
 
 `skills/office-document-regression/` に Agent Skill(Claude Code / Codex /
-ChatGPT 互換)が入っています。「コピーを編集 → `templategate check` を実行 →
-JSONレポートを解釈 → **FAILを通すためにポリシーを書き換えることは絶対にしない**」
+Claude Cowork ほか、指示ファイルを読めるエージェントならどれでも)が入って
+います。「コピーを編集 → `templategate check` を実行 → JSONレポートを解釈 →
+**FAILを通すためにポリシーを書き換えることは絶対にしない**」
 という安全な作業手順をエージェントに教えます。
+
+導入方法:
+
+- **Claude Code** — プロジェクトの `.claude/skills/` に(全プロジェクトで
+  使うなら `~/.claude/skills/` に)ディレクトリごとコピーします。
+
+  ```bash
+  cp -r skills/office-document-regression .claude/skills/
+  ```
+
+- **その他のエージェント(Codex、Claude Cowork など)** — `SKILL.md` は
+  Claude 固有の内容を含まないただの指示ファイルです。`AGENTS.md` や
+  システムプロンプトから「Excel / Word 文書を編集する前に
+  `skills/office-document-regression/SKILL.md` を読んで従うこと」のように
+  参照させてください。
 
 ## GitHub Action
 

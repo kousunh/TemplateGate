@@ -172,3 +172,7 @@ templategate diff --baseline a.xlsx --candidate b.xlsx --json  # inspect all cha
 templategate snapshot file.xlsx                                 # what TemplateGate sees
 templategate init --target excel                                # policy template (draft for the user)
 ```
+
+When you show the outcome to the user, speak their language: `--report text
+--lang ja` (or `en`) renders the human-readable report. Keep `--report json`
+for your own loop — its structure never changes with the language.
