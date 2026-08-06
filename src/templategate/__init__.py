@@ -1,6 +1,6 @@
 """TemplateGate — policy-as-code acceptance gate for AI-edited Office documents."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .api import check, detect_target, diff, snapshot
 from .core.model import Change, CheckResult, SemanticFinding, Violation
