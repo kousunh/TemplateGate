@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "templategate"
-version = "0.1.2"
+version = "0.1.3"
 description = "Policy-as-code acceptance gate for AI-edited Excel & Word documents (.xlsx / .xlsm / .docx). Verifies that only intended changes were made."
 readme = "README.md"
 license = "MIT"

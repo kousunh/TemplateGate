@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-06
+
+### Fixed
+
+- `templategate --version` reported a stale number in both 0.1.1 (`0.1.0`)
+  and 0.1.2 (`0.1.1`): a hardcoded `__version__` next to the real version in
+  `pyproject.toml` let the two drift apart twice in a row. `__version__` is
+  now read from the installed package's metadata at import time, so there is
+  only one number to update per release.
+
 ## [0.1.2] - 2026-08-06
 
 ### Fixed
