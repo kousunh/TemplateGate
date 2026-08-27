@@ -60,16 +60,19 @@ project's own dependencies:
 uv tool install templategate
 ```
 
-To use the Python API from your own project instead, add it as a dependency:
-
-```bash
-uv add templategate
-```
-
 Plain pip works too, if you would rather not add a tool:
 
 ```bash
 pip install templategate
+```
+
+To use the Python API from your own project instead, add it as a dependency.
+The CLI then lives in that project's environment rather than on your PATH, so
+run it through `uv run`:
+
+```bash
+uv add templategate
+uv run templategate --version
 ```
 
 To try the latest unreleased revision, replace `templategate` with
@@ -484,8 +487,8 @@ the same omissions every time. Retrying is pointless. Three things do work:
 
 - **Use a richer editor.** A document with charts, shapes and real formatting
   needs a tool that understands them. Driving real Excel or Word through COM —
-  xlwings, or the automation interface directly — is the safest option and is
-  available on any machine with Office installed.
+  xlwings, or the automation interface directly — generally preserves more of
+  the source document, but requires an Office installation.
 - **Edit the package directly.** For a value-only change, rewriting the one
   XML part inside the `.xlsx` zip touches nothing else by construction.
 - **Let real Office repair what it can.** Opening a library-damaged workbook in

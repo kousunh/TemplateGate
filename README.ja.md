@@ -57,17 +57,19 @@ TemplateGate はコマンドラインツールです。プロジェクトの依�
 uv tool install templategate
 ```
 
-自分のプロジェクトから Python API として使う場合は、依存パッケージとして
-追加します:
-
-```bash
-uv add templategate
-```
-
 ツールを増やしたくない場合は、pip でも同じことができます:
 
 ```bash
 pip install templategate
+```
+
+自分のプロジェクトから Python API として使う場合は、依存パッケージとして
+追加します。この場合 CLI は PATH ではなくそのプロジェクトの環境に入るため、
+`uv run` を付けて実行します:
+
+```bash
+uv add templategate
+uv run templategate --version
 ```
 
 リリース前の最新版を試す場合は、いずれのコマンドでも `templategate` を
@@ -486,8 +488,8 @@ templategate snapshot file.docx                           # 構造スナップ�
 
 - **より豊かなエディタを使う。** グラフ・図形・本格的な書式を持つ文書には、
   それらを理解できるツールが必要です。実機の Excel / Word を COM 経由で
-  動かす方法(xlwings など)が最も安全で、Office が入っている PC なら
-  どこでも使えます。
+  動かす方法(xlwings など)は、元の文書をより多く保持できる傾向があります。
+  ただし Office のインストールが前提になります。
 - **パッケージを直接編集する。** 値だけの変更なら、`.xlsx` の zip 内の
   該当 XML パートだけを書き換えれば、構造上それ以外には触れません。
 - **直せる範囲は実機 Office に直させる。** ライブラリが壊したブックを
