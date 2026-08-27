@@ -360,12 +360,17 @@ current set. The ones worth knowing about:
 - **Excel** — `layout` (hidden rows and columns, and their sizes),
   `protection` (sheet and workbook locking), `sheet_settings` (a workbook
   switched to manual calculation, or Excel's warning triangles suppressed).
+  `defined_names` covers named ranges, workbook-scoped and sheet-scoped
+  alike, which is what catches a name repointed at a different range while
+  every formula that uses it still reads the same.
 - **Word** — `paragraph_format`, `field`, `bookmark`, `content_control`,
   `revision` (tracked changes), and `moved` for a block whose content survived
   but whose position did not. `markup` is the backstop: anything inside a
   block that no other attribute accounts for, which is what catches an
   unmodelled character style, a deleted footnote reference, a removed comment
-  anchor, or a form field quietly disabled.
+  anchor, or a form field quietly disabled. `tables` is the structural key
+  for Word tables — a table added or removed, its style or its row and
+  column shape changed, or a cell's content rewritten.
 
 The VBA project keeps its own `vba` selector and attribute rather than living
 under `package#`.
