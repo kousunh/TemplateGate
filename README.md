@@ -446,9 +446,10 @@ All of them, for detection. The gate judges the file, not the editor, so no
 tool is unsupported. What differs is how much collateral each one leaves
 behind, and therefore how wide your policy has to be to accept a correct edit.
 
-Measured 2026-07-31 by opening one Excel-authored workbook — formulas with
-cached results, hidden columns, a seal image, a Japanese date format, theme
-colours — and saving it again with **no edit at all**:
+Measured 2026-07-31 on two documents — one Excel-authored workbook (formulas
+with cached results, hidden columns, a seal image, a Japanese date format,
+theme colours) and one Word-authored document — each opened and saved again
+with **no edit at all**:
 
 | Writer | Version | Changes | What it did |
 |---|---|---|---|
@@ -484,9 +485,10 @@ the same omissions every time. Retrying is pointless. Three things do work:
   XML part inside the `.xlsx` zip touches nothing else by construction.
 - **Let real Office repair what it can.** Opening a library-damaged workbook in
   Excel and saving restores the cached results it can recompute. In the run
-  above that took openpyxl's 14 changes down to 2 — but the two that remained
-  were the deleted image and the dropped extension block. **A resave recomputes;
-  it does not resurrect.** Anything actually removed is still gone.
+  above that took openpyxl's 13 changes down to 2 — the hidden-column width and
+  the dropped extension block, neither of which a recalculation can reach.
+  **A resave recomputes; it does not resurrect.** Anything actually removed is
+  still gone.
 
 ## When the gate fails
 
