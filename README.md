@@ -600,9 +600,14 @@ summary either way. It exposes two outputs, `passed` (`true` / `false`) and
 `report-path`; to read them instead of failing the job, add
 `continue-on-error: true` to the step.
 
-`@v1` is a floating tag that follows the latest release. For CI you audit,
-pin to a full commit SHA instead (`kousunh/TemplateGate/action@<sha>`) — the
-same practice you would apply to any third-party action.
+`@v1` is a floating tag that follows the latest *published* release: the
+publish workflow force-moves it onto the release commit after the upload to
+PyPI succeeds, so it tracks what PyPI ships rather than the tip of `main`.
+Between releases it can therefore sit behind `main` — or briefly ahead of the
+newest version tag, when the change that moved it has not been released yet.
+For CI you audit, pin to a full commit SHA instead
+(`kousunh/TemplateGate/action@<sha>`) — the same practice you would apply to
+any third-party action.
 
 ## What TemplateGate is not
 
