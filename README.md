@@ -13,23 +13,28 @@ while doing it. TemplateGate is a **read-only regression test** for
 with a *candidate* (after the edit) and verifies that **only the changes your
 policy allows were made**.
 
-- **Default deny / fail closed** — any change not explicitly allowed is a violation.
+## What it catches
+
 - **Deterministic structural checks** — values, formulas, formats, merged cells,
   conditional formatting, data validation, sheet structure, images (count /
   content hash / position / size), headers & footers, print settings, VBA,
   Word paragraphs / tables / sections.
-- **Catches what editing tools silently throw away** — charts, pivot tables,
-  comments, embedded objects, custom XML, Excel shapes & textboxes, and every
-  other part of the file besides. Parts are read straight out of the document's
+- **What editing tools silently throw away** — charts, pivot tables, comments,
+  embedded objects, custom XML, Excel shapes & textboxes, and every other part
+  of the file besides. Parts are read straight out of the document's
   internal package, so damage is caught even when the tool that made the edit
   could not represent those parts in the first place — the failure mode where
   you get a file back that opens fine and looks fine, minus its charts. A part
   nobody recognises still counts: unknown is not the same as allowed.
-- **Catches what you cannot see** — a row quietly hidden, a sheet left
-  unlocked, a workbook switched to manual calculation so every formula shows a
-  stale answer, a hyperlink repointed while its display text stays put, body
-  text set to 4pt white. Edits made as tracked changes are visible too: an
-  insertion is text on the page, so it is reported as one.
+- **What you cannot see** — a row quietly hidden, a sheet left unlocked, a
+  workbook switched to manual calculation so every formula shows a stale
+  answer, a hyperlink repointed while its display text stays put, body text set
+  to 4pt white. Edits made as tracked changes are visible too: an insertion is
+  text on the page, so it is reported as one.
+
+## Why TemplateGate
+
+- **Default deny / fail closed** — any change not explicitly allowed is a violation.
 - **Optional semantic checks** — `off` (default; nothing ever leaves your
   machine), `review` (AI findings as warnings), or `gate` (AI findings affect
   PASS/FAIL). Bring your own model — TemplateGate does not pin a vendor.
