@@ -7,6 +7,7 @@ two-second fix.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
@@ -18,6 +19,7 @@ from templategate.core.policy import (
     SAMPLE_POLICY_EXCEL,
     SAMPLE_POLICY_WORD,
     PolicyError,
+    load_policy,
     parse_policy,
 )
 from templategate.reporters import render_json, render_markdown, render_text
@@ -82,6 +84,22 @@ def test_both_starter_policies_survive_their_own_validation():
 
     for sample in (SAMPLE_POLICY_EXCEL, SAMPLE_POLICY_WORD):
         assert parse_policy(yaml.safe_load(sample)) is not None
+
+
+EXAMPLE_POLICIES = sorted(
+    (Path(__file__).parent.parent / "examples").glob("*.policy.yaml")
+)
+
+
+def test_the_examples_directory_is_not_empty():
+    """A glob that matches nothing would make the test below vacuous."""
+    assert EXAMPLE_POLICIES
+
+
+@pytest.mark.parametrize("path", EXAMPLE_POLICIES, ids=lambda p: p.name)
+def test_every_shipped_example_policy_still_parses(path):
+    """The examples are copy-paste starting points, so they must load."""
+    assert load_policy(path) is not None
 
 
 def test_a_bad_policy_exits_two(tmp_path, fixtures, capsys):
