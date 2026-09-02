@@ -575,3 +575,150 @@ def test_result_json_roundtrip(fixtures):
     assert data["tool"] == "templategate"
     assert data["passed"] is False
     assert data["summary"]["violations"] == len(result.violations)
+
+
+# --- recalculated formula results ----------------------------------------
+#
+# Real Excel recomputes on save, so a workbook opened and saved after a
+# correct edit differs in every dependent cell.  Those cells are the arithmetic
+# of whoever saved the file, not the edit, and failing them made a correct
+# edit unshippable the moment it went through Excel.  What must never soften
+# is the other case: a formula replaced by the number it happened to show.
+
+
+def _cached(path, results: dict[str, object]):
+    """Stamp cached results onto a workbook's formulas, the way Excel does.
+
+    openpyxl never computes, so a workbook it writes stores no answers at all
+    and the difference this whole section is about cannot be built with it.
+    """
+    import re
+    import zipfile
+
+    from generate import rewrite_zip
+
+    part = "xl/worksheets/sheet1.xml"
+    with zipfile.ZipFile(path) as zf:
+        xml = zf.read(part).decode("utf-8")
+
+    def stamp(match):
+        reference, body = match.group(1), match.group(0)
+        if "<f>" not in body or reference not in results:
+            return body
+        return body.replace("</f>", f"</f><v>{results[reference]}</v>")
+
+    patched = re.sub(r'<c r="([A-Z]+[0-9]+)"[^>]*>.*?</c>', stamp, xml)
+    assert patched != xml, "no formula cell was given a cached result"
+    destination = path.with_name(path.stem + ".cached.xlsx")
+    rewrite_zip(path, destination, add={part: patched.encode("utf-8")})
+    return destination
+
+
+def _totals_book(path, quantity=2):
+    wb = Workbook()
+    ws = wb.active
+    ws["A1"] = quantity
+    ws["A2"] = "=A1*100"
+    ws["A3"] = "=A2+1"
+    wb.save(path)
+    return path
+
+
+_QUANTITY_POLICY = parse_policy({
+    "version": 1, "target": "excel",
+    "allow": [{"selector": "Sheet!A1", "attributes": ["value"]}],
+    "protect": [{"selector": "*", "attributes": ["formula"]}],
+})
+
+
+def _recalc_pair(tmp_path):
+    """One quantity edited, and every dependent answer recomputed."""
+    baseline = _cached(_totals_book(tmp_path / "base.xlsx", 2),
+                       {"A2": 200, "A3": 201})
+    candidate = _cached(_totals_book(tmp_path / "cand.xlsx", 3),
+                        {"A2": 300, "A3": 301})
+    return baseline, candidate
+
+
+def test_a_recalculated_result_is_marked_as_one(tmp_path):
+    baseline, candidate = _recalc_pair(tmp_path)
+    values = {c.location: c for c in diff(baseline, candidate)
+              if c.attribute == ATTR_VALUE}
+    assert values["Sheet!A2"].recalculated
+    assert values["Sheet!A3"].recalculated
+    # The cell somebody actually typed in holds no formula, so nothing about
+    # it was recalculated and it is judged like any other edit.
+    assert not values["Sheet!A1"].recalculated
+
+
+def test_recalculated_results_do_not_fail_a_correct_edit(tmp_path):
+    baseline, candidate = _recalc_pair(tmp_path)
+    result = check(baseline, candidate, _QUANTITY_POLICY)
+    assert result.passed, [v.change.location for v in result.violations]
+    assert result.recalculated_ignored == 2
+    # Ignored, not invisible: the total still counts them and the report says
+    # where they went.
+    assert len(result.changes) == 3
+
+
+def test_the_report_says_how_many_were_ignored(tmp_path):
+    from templategate.reporters import render_json, render_markdown, render_text
+
+    baseline, candidate = _recalc_pair(tmp_path)
+    result = check(baseline, candidate, _QUANTITY_POLICY)
+    assert "2 recalculated formula results ignored" in render_text(result)
+    assert "2 recalculated formula results ignored" in render_markdown(result)
+    import json
+    assert json.loads(render_json(result))["summary"]["recalculated_ignored"] == 2
+    assert "再計算" in render_text(result, "ja")
+
+
+def test_a_formula_replaced_by_its_own_number_still_fails(tmp_path):
+    """The archetypal damage, and the reason none of this may be relaxed."""
+    baseline = _cached(_totals_book(tmp_path / "base.xlsx", 2),
+                       {"A2": 200, "A3": 201})
+    plain = _totals_book(tmp_path / "cand.xlsx", 2)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(plain)
+    wb["Sheet"]["A2"] = 200          # the same number, no longer computed
+    wb.save(plain)
+    candidate = _cached(plain, {"A3": 201})
+
+    changes = diff(baseline, candidate)
+    hardcoded = [c for c in changes
+                 if c.location == "Sheet!A2" and c.attribute == ATTR_FORMULA]
+    assert hardcoded and hardcoded[0].new is None
+    # Nothing about a lost formula is a recalculation, whatever the value did.
+    assert not any(c.recalculated for c in changes if c.location == "Sheet!A2")
+
+    result = check(baseline, candidate, _QUANTITY_POLICY)
+    assert not result.passed
+    assert any(v.change.attribute == ATTR_FORMULA for v in result.violations)
+
+
+def test_recalculation_strict_judges_cached_results_again(tmp_path):
+    baseline, candidate = _recalc_pair(tmp_path)
+    strict = parse_policy({
+        "version": 1, "target": "excel", "recalculation": "strict",
+        "allow": [{"selector": "Sheet!A1", "attributes": ["value"]}],
+        "protect": [{"selector": "*", "attributes": ["formula"]}],
+    })
+    result = check(baseline, candidate, strict)
+    assert not result.passed
+    assert {v.change.location for v in result.violations} == {"Sheet!A2", "Sheet!A3"}
+    assert result.recalculated_ignored == 0
+
+
+def test_a_discarded_cached_result_is_a_recalculation_too(tmp_path):
+    """openpyxl's mirror image: it throws the stored answers away."""
+    baseline = _cached(_totals_book(tmp_path / "base.xlsx", 2),
+                       {"A2": 200, "A3": 201})
+    from openpyxl import load_workbook
+
+    wb = load_workbook(baseline)
+    wb["Sheet"]["A1"] = 3
+    wb.save(tmp_path / "cand.xlsx")
+    result = check(baseline, tmp_path / "cand.xlsx", _QUANTITY_POLICY)
+    assert result.passed, [v.change.location for v in result.violations]
+    assert result.recalculated_ignored == 2

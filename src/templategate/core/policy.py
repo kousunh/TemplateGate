@@ -19,10 +19,15 @@ from .model import ALL_ATTRIBUTES, STRUCTURAL_ATTRIBUTES
 VALID_TARGETS = ("excel", "word", "auto")
 
 VALID_KEYS = ("version", "target", "mode", "allow", "protect",
-              "structural", "semantic")
+              "structural", "recalculation", "semantic")
 VALID_RULE_KEYS = ("selector", "attributes")
 VALID_SEMANTIC_KEYS = ("mode", "provider", "command", "model", "checks")
 VALID_STRUCTURAL_VALUES = ("strict", "ignore")
+# What to do with a cached formula result that moved while its formula did
+# not.  "ignore" (the default) treats it as the arithmetic of whichever tool
+# saved the file; "strict" judges it like any other value change, for a
+# workflow where the stored answers themselves are the deliverable.
+VALID_RECALCULATION_VALUES = ("ignore", "strict")
 
 # review_only    — violations are reported as warnings and never fail the run.
 # normal_input   — the default: every violation is an error.
@@ -105,6 +110,7 @@ class Policy:
     allow: list[Rule] = field(default_factory=list)
     protect: list[Rule] = field(default_factory=list)
     structural: dict = field(default_factory=dict)
+    recalculation: str = "ignore"
     semantic: SemanticConfig = field(default_factory=SemanticConfig)
     source_path: str = ""
 
@@ -154,6 +160,12 @@ def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
                 hint=_did_you_mean(str(value).lower(),
                                    VALID_STRUCTURAL_VALUES)))
 
+    recalculation = str(raw.get("recalculation", "ignore")).lower()
+    if recalculation not in VALID_RECALCULATION_VALUES:
+        raise PolicyError(message(
+            "policy.bad_recalculation", value=raw.get("recalculation"),
+            hint=_did_you_mean(recalculation, VALID_RECALCULATION_VALUES)))
+
     sem_raw = raw.get("semantic", {}) or {}
     if not isinstance(sem_raw, dict):
         raise PolicyError(message("policy.semantic_shape"))
@@ -188,6 +200,7 @@ def parse_policy(raw: dict, *, source_path: str = "") -> Policy:
         allow=allow,
         protect=protect,
         structural=structural,
+        recalculation=recalculation,
         semantic=semantic,
         source_path=source_path,
     )
@@ -235,6 +248,15 @@ structural:
   custom_xml: strict
   parts: strict            # every other package part, including unknown ones
   links: strict            # external hyperlink and reference targets
+
+# What to do when a formula's cached result moves but the formula itself does
+# not — Excel recomputing on save, or a library discarding the answers.
+#   ignore (default) — not a change to the document's logic, so not a
+#                      violation.  `formula` still catches a formula replaced
+#                      by a literal.
+#   strict           — judge those values like any other, for a workbook whose
+#                      stored answers are themselves the deliverable.
+recalculation: ignore      # ignore | strict
 
 semantic:
   mode: "off"              # off | review | gate

@@ -73,4 +73,5 @@ def test_json_counts_warnings_separately_from_errors():
         "violations": 1,
         "errors": 0,
         "warnings": 1,
+        "recalculated_ignored": 0,
     }

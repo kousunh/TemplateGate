@@ -108,6 +108,10 @@ class Change:
     # paragraph that shifted up behind it.  Evaluation ignores this: each
     # change is still judged on its own.
     group: str = ""
+    # A value that moved while the formula producing it stayed byte-identical:
+    # the answer was recomputed, not rewritten.  Set only by the comparison
+    # layer; the policy decides what to do with it (see ``recalculation``).
+    recalculated: bool = False
     def to_dict(self) -> dict:
         # ``detail`` and ``group`` may be Detail instances, which are strings
         # carrying the message id that produced them.  They serialise as the
@@ -154,6 +158,11 @@ class CheckResult:
     semantic_findings: list[SemanticFinding] = field(default_factory=list)
     # Things wrong with the policy itself rather than with the document.
     warnings: list[str] = field(default_factory=list)
+    # Cached formula results that moved while their formulas did not, and
+    # that ``recalculation: ignore`` dropped before evaluation.  Counted
+    # rather than listed: they are noise the reader asked not to see, but
+    # silently losing several changes from the totals would be worse.
+    recalculated_ignored: int = 0
     meta: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -169,6 +178,7 @@ class CheckResult:
                 "violations": len(self.violations),
                 "errors": sum(1 for v in self.violations if v.severity == SEVERITY_ERROR),
                 "warnings": sum(1 for v in self.violations if v.severity == SEVERITY_WARNING),
+                "recalculated_ignored": self.recalculated_ignored,
             },
             "warnings": list(self.warnings),
             "violations": [v.to_dict() for v in self.violations],

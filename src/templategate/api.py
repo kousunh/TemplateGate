@@ -146,6 +146,9 @@ def check(
     changes = _diff_snapshots(base_snap, cand_snap, target,
                               align=policy.mode == MODE_PAGE_EXTENSION)
     allowed, violations = evaluate(changes, policy)
+    recalculated_ignored = (
+        sum(1 for c in changes if c.recalculated)
+        if policy.recalculation == "ignore" else 0)
 
     from .core.liveness import policy_warnings
 
@@ -192,6 +195,7 @@ def check(
         semantic_mode=mode,
         semantic_findings=findings,
         warnings=warnings,
+        recalculated_ignored=recalculated_ignored,
         meta={"policy": policy.source_path, "policy_mode": policy.mode,
               "degraded": degraded},
     )

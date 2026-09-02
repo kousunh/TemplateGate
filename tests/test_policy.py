@@ -82,3 +82,42 @@ def test_structural_ignore_drops_changes():
     changes = [Change("sheet:Temp", "sheet_structure", detail="sheet added")]
     allowed, violations = evaluate(changes, policy)
     assert not allowed and not violations
+
+
+def test_recalculation_defaults_to_ignore():
+    assert parse_policy({"target": "excel"}).recalculation == "ignore"
+
+
+def test_recalculation_must_be_a_known_setting():
+    with pytest.raises(PolicyError):
+        parse_policy({"target": "excel", "recalculation": "off"})
+
+
+def test_recalculation_ignore_drops_a_recomputed_value():
+    policy = parse_policy({"target": "excel"})
+    changes = [Change("Sheet1!C3", "value", old=1, new=2, recalculated=True)]
+    allowed, violations = evaluate(changes, policy)
+    assert not allowed and not violations
+
+
+def test_recalculation_ignore_beats_an_explicit_protect_rule():
+    """Otherwise `protect: [value]` fails every save real Excel makes.
+
+    The rule that produces the number is still protected under `formula`,
+    which is the guarantee that matters.
+    """
+    policy = parse_policy({
+        "target": "excel",
+        "protect": [{"selector": "*", "attributes": ["value"]}],
+    })
+    recomputed = Change("Sheet1!C3", "value", old=1, new=2, recalculated=True)
+    typed = Change("Sheet1!C4", "value", old=1, new=2)
+    _allowed, violations = evaluate([recomputed, typed], policy)
+    assert [v.change.location for v in violations] == ["Sheet1!C4"]
+
+
+def test_recalculation_strict_judges_it_like_any_other_value():
+    policy = parse_policy({"target": "excel", "recalculation": "strict"})
+    changes = [Change("Sheet1!C3", "value", old=1, new=2, recalculated=True)]
+    _allowed, violations = evaluate(changes, policy)
+    assert [v.change.location for v in violations] == ["Sheet1!C3"]

@@ -308,7 +308,17 @@ def _diff_sheet(name: str, b: dict, c: dict, *,
         new = c["cells"].get(coord, _DEFAULT_CELL)
         loc = f"{sheet}!{coord}"
         if old["value"] != new["value"]:
-            changes.append(Change(loc, ATTR_VALUE, old=old["value"], new=new["value"]))
+            # A cell whose formula did not move by one character, but whose
+            # stored answer did, was recalculated rather than edited: Excel
+            # recomputes on save, openpyxl throws the answer away instead.
+            # Both are the saving tool talking, not the edit, so the change is
+            # marked and the policy decides (``recalculation``).  A formula
+            # that changed or vanished is never marked — that is the damage
+            # this gate exists to catch, and it is reported under `formula`
+            # as well as here.
+            recalculated = bool(old["formula"]) and old["formula"] == new["formula"]
+            changes.append(Change(loc, ATTR_VALUE, old=old["value"], new=new["value"],
+                                  recalculated=recalculated))
         if old["formula"] != new["formula"]:
             said = ""
             if old["formula"] and not new["formula"]:

@@ -2,9 +2,11 @@
 
 Order of precedence per change:
   1. structural category set to "ignore"  -> dropped (not even reported)
-  2. matches a protect rule               -> violation ("protected")
-  3. matches an allow rule                -> allowed
-  4. otherwise                            -> violation ("not_allowed")
+  2. a recalculated formula result, under "recalculation: ignore" (the
+     default)                             -> dropped, counted in the report
+  3. matches a protect rule               -> violation ("protected")
+  4. matches an allow rule                -> allowed
+  5. otherwise                            -> violation ("not_allowed")
 
 Violations are errors, except under ``mode: review_only``, where they are
 reported as warnings so the run still passes.
@@ -38,8 +40,19 @@ def evaluate(changes: list[Change], policy: Policy) -> tuple[list[Change], list[
 
     allowed: list[Change] = []
     violations: list[Violation] = []
+    ignore_recalculated = policy.recalculation == "ignore"
+
     for change in changes:
         if change.attribute in ignored_attrs:
+            continue
+        # The formula is byte-identical and only its stored answer moved, so
+        # nothing about the document's logic changed — Excel recomputed on
+        # save, or a library discarded the cache.  Dropped before protect, on
+        # purpose: `protect: [value]` on a computed cell would otherwise fail
+        # every real-Excel save, and the formula that produces the answer is
+        # still guarded under `formula`.  Set `recalculation: strict` to judge
+        # these like any other value change.
+        if ignore_recalculated and change.recalculated:
             continue
 
         protected = any(

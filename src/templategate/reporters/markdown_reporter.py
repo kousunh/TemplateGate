@@ -26,6 +26,9 @@ def render_markdown(result: CheckResult, lang: str = "en") -> str:
                  allowed=len(result.allowed),
                  violations=len(result.violations)),
     ]
+    if result.recalculated_ignored:
+        lines.append(t("report.md.recalculated",
+                       count=result.recalculated_ignored))
     for role, reason in (result.meta.get("degraded") or {}).items():
         lines += ["",
                   t("damaged.md.line", role=t(f"role.{role}"),

@@ -99,6 +99,12 @@ def render_text(result: CheckResult, lang: str = "en") -> str:
                  allowed=len(result.allowed),
                  violations=len(result.violations)),
     ]
+    # Said on the summary line rather than in a section of its own: these are
+    # changes the reader will see in the total but nowhere in the list, and
+    # not accounting for them would look like arithmetic that does not add up.
+    if result.recalculated_ignored:
+        lines.append("  " + t("report.recalculated",
+                              count=result.recalculated_ignored))
     for role, reason in (result.meta.get("degraded") or {}).items():
         lines.append("  ! " + t("damaged.line", role=t(f"role.{role}"),
                                 reason=reason))

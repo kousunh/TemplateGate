@@ -57,6 +57,10 @@ CATALOG: dict[str, dict[str, str]] = {
         "report.semantic": "Semantic checks ({mode}):",
         "report.md.semantic": "### Semantic checks ({mode})",
         "report.md.columns": "| Severity | Location | Attribute | Old | New | Rule |",
+        "report.recalculated": ("{count} recalculated formula results ignored "
+                                "(recalculation: ignore)"),
+        "report.md.recalculated": ("- {count} recalculated formula results "
+                                   "ignored (`recalculation: ignore`)"),
         "report.cascade": ("content shifted because {reason} — {count} knock-on "
                            "changes collapsed; the JSON report lists each one"),
         "report.md.cascade": "{count} knock-on changes",
@@ -93,6 +97,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "policy.structural_shape": "'structural' must be a mapping",
         "policy.bad_structural":
             "structural.{key}: {value!r} is not a setting{hint}",
+        "policy.bad_recalculation":
+            "recalculation: {value!r} is not a setting{hint}",
         "policy.semantic_shape": "'semantic' must be a mapping",
         "policy.bad_semantic_mode":
             "semantic.mode: {value!r} is not a mode{hint}",
@@ -259,6 +265,10 @@ CATALOG: dict[str, dict[str, str]] = {
         "report.semantic": "意味チェック（{mode}）:",
         "report.md.semantic": "### 意味チェック（{mode}）",
         "report.md.columns": "| 重大度 | 位置 | 属性 | 変更前 | 変更後 | 規則 |",
+        "report.recalculated": ("再計算による数式の計算結果の差異 {count} 件は"
+                                "対象外としました（recalculation: ignore）"),
+        "report.md.recalculated": ("- 再計算による数式の計算結果の差異 {count} 件は"
+                                   "対象外としました（`recalculation: ignore`）"),
         "report.cascade": ("{reason}により内容が繰り下がりました。"
                            "連鎖した変更{count}件をまとめています"
                            "（個々の変更は JSON レポートに記載）"),
@@ -296,6 +306,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "policy.structural_shape": "'structural' はマッピングで書いてください",
         "policy.bad_structural":
             "structural.{key}: {value!r} は設定値として指定できません{hint}",
+        "policy.bad_recalculation":
+            "recalculation: {value!r} は設定値として指定できません{hint}",
         "policy.semantic_shape": "'semantic' はマッピングで書いてください",
         "policy.bad_semantic_mode":
             "semantic.mode: {value!r} はモードとして指定できません{hint}",
