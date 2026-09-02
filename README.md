@@ -144,12 +144,23 @@ structural:
   comments: strict                # or an Excel shape / textbox
   parts: strict                   # ...or any other part of the file
   links: strict                   # or a hyperlink repointed elsewhere
+recalculation: ignore             # recomputed formula results are not edits
 semantic:
   mode: "off"                     # off | review | gate
 ```
 
 Every structural category is `strict` unless you say otherwise — deleting the
 line does not turn it off. Set one to `ignore` to opt out.
+
+`recalculation` decides what to do when a formula's *cached result* moves
+while the formula itself does not: Excel recomputes on save, openpyxl throws
+the stored answers away, and neither is something the edit did. The default,
+`ignore`, does not treat those values as changes; the report still counts them
+and says how many it ignored. **This never softens the case that matters** — a
+formula replaced by the number it happened to show is a change to `formula`,
+not a recalculation, and still fails. Set `recalculation: strict` to judge
+cached results like any other value, for a workbook whose stored answers are
+themselves the deliverable.
 
 Two worked examples live in [`examples/`](examples/): an Excel policy that
 lets an agent update quantity cells and nothing else
@@ -218,22 +229,22 @@ arrive commented out, for you to accept one at a time.
 If the edit is made in Excel itself — by a person, or by an agent driving it
 through COM — then a *correct, allowed* edit still changes more than the cell
 you touched. Excel recalculates dependent formulas and refreshes chart caches
-on every save, so the file legitimately differs in places nobody edited. A
-policy that allows only the target cells will fail a perfectly good edit.
+on every save, so the file legitimately differs in places nobody edited.
 
 Editing a *single* quantity cell in a real workbook produced five changes: the
 value itself, the cached results of two formulas that depend on it, the result
 of an array formula, and the chart's cached copy of the series data.
 
-The recipe:
+The recomputed results are handled for you. A cell whose formula is
+byte-identical on both sides and whose stored answer moved was recalculated,
+not edited, and the default `recalculation: ignore` does not count it as a
+change — the report says `5 recalculated formula results ignored` and passes.
+So the policy only has to name the cells a person actually edits, plus the
+caches that live outside the cell grid:
 
 ```yaml
 allow:
   - selector: "Sales!B3:B5"        # the cells actually being edited
-    attributes: [value]
-  - selector: "Sales!D3:D7"        # results of formulas that depend on them
-    attributes: [value]
-  - selector: "Sales!G3:G5"        # array-formula results — easy to forget
     attributes: [value]
   - selector: "package#charts:*"   # chart caches Excel refreshes on save
     attributes: [charts]
@@ -243,9 +254,25 @@ protect:
                  data_validation, print_settings, header_footer, vba]
 ```
 
-Allowing `value` generously on computed ranges is safe **because `formula`
-stays protected**: the results may move, but the rules that produce them may
-not. A formula overwritten with a literal is still caught, under `formula`.
+This is safe **because `formula` stays protected**: the results may move, but
+the rules that produce them may not. A formula overwritten with a literal is
+not a recalculation — the formula is gone — so it is still caught, under
+`formula`, exactly as before.
+
+If the stored answers are themselves the deliverable — a workbook shipped to
+somebody who will never open it in Excel — set `recalculation: strict` and
+allow the computed ranges explicitly instead:
+
+```yaml
+recalculation: strict
+allow:
+  - selector: "Sales!B3:B5"        # the cells actually being edited
+    attributes: [value]
+  - selector: "Sales!D3:D7"        # results of formulas that depend on them
+    attributes: [value]
+  - selector: "Sales!G3:G5"        # array-formula results — easy to forget
+    attributes: [value]
+```
 
 Allowing `package#charts:*` does mean a deliberate edit to a chart's own
 definition would pass. The chart's *presence* is still guarded — deleting it
@@ -266,11 +293,11 @@ cell whose value and number format were both rewritten, two hidden columns
 whose widths read back differently, and a workbook extension block that was
 dropped.
 
-The fix is the same recipe — allow `value` across the computed ranges, keep
-`formula` protected — and it is safe for the same reason: the cached answers
-may move or vanish, the formulas that produce them may not. Expect to allow a
-little more than values alone, such as `format` on a date cell the library
-cannot round-trip and `layout` on hidden columns.
+`recalculation: ignore` covers this direction too: an answer that vanished
+from a cell whose formula is untouched is the same kind of non-event as an
+answer that was recomputed. What is left needs allowing by hand, and it is a
+little more than values alone — `format` on a date cell the library cannot
+round-trip, `layout` on hidden columns.
 
 Steady state is quiet. When the baseline and the candidate come from the same
 tool, there is no cascade and a narrow policy is exactly right.

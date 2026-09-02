@@ -106,9 +106,15 @@ library does the opposite and discards the cached results, leaving those cells
 empty until Excel next opens the file. So editing an Excel-authored workbook
 with openpyxl cascades just as much as editing through Excel does.
 
-If the policy allows only the cells you edited, a correct edit still FAILs.
-Report that to the user as a policy needing widening on the computed ranges,
-rather than assuming you broke the file. Do not edit the policy yourself.
+Recomputed and discarded formula results are handled by the gate itself: a
+cell whose formula is unchanged and whose stored answer moved is reported as
+recalculated and ignored, and the report says how many (`recalculation:
+ignore`, the default). What still FAILs is everything the recalculation does
+not explain — chart caches, a number format, a hidden column's width — and a
+formula that is gone rather than recomputed, which is real damage. If a
+correct edit still FAILs on a cached result, the policy has
+`recalculation: strict`; report that to the user rather than assuming you
+broke the file. Do not edit the policy yourself.
 
 ## If the document is opened in real Word
 

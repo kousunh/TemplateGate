@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A workbook opened and saved in real Excel after a correct edit no longer
+  fails. Excel recalculates on save, so every dependent cell's cached result
+  moves; those values were reported as `value` changes and denied by a policy
+  that allowed only the cells actually edited. A cell whose formula is
+  byte-identical on both sides and whose stored answer moved is now recognised
+  as *recalculated* rather than edited. The mirror case is covered too:
+  openpyxl discards cached results instead of refreshing them.
+
+### Added
+
+- Policy key `recalculation: ignore | strict` (default `ignore`), deciding
+  whether a recomputed formula result counts as a change. A formula replaced
+  by the number it happened to show is **not** a recalculation — the formula
+  is gone — and still fails under `formula`, whatever this is set to.
+- Reports say how many were ignored: a summary line in the text and Markdown
+  reports, and `summary.recalculated_ignored` in the JSON report. Changes
+  carry a `recalculated` flag, so the JSON change shape gains one key.
+
 ## [0.1.3] - 2026-08-06
 
 ### Fixed
